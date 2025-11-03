@@ -1,0 +1,238 @@
+import React from 'react';
+import { Calendar, Download, Mail, Link2, CreditCard, Clock, CheckCircle, XCircle, AlertCircle } from 'lucide-react';
+
+interface Booking {
+    id: number;
+    from_date: string;
+    to_date: string;
+    price: number;
+    booking_price: number;
+    payment_status: string;
+    package?: { name: string };
+    payments: Array<{
+        id: number;
+        amount: string;
+        status: string;
+        payment_method?: string;
+        created_at: string;
+    }>;
+    payment_summary: {
+        total_price: number;
+        total_paid: number;
+        remaining_balance: number;
+        payment_percentage: number;
+    };
+}
+
+interface Props {
+    booking: Booking;
+    onDownloadInvoice: (id: number) => void;
+    onEmailInvoice: (id: number) => void;
+    onGeneratePaymentLink: (id: number) => void;
+    onUpdatePaymentStatus: (paymentId: number, status: string) => void;
+}
+
+export default function BookingCard({
+    booking,
+    onDownloadInvoice,
+    onEmailInvoice,
+    onGeneratePaymentLink,
+    onUpdatePaymentStatus
+}: Props) {
+    const getStatusBadgeClass = (status: string) => {
+        switch (status.toLowerCase()) {
+            case 'paid': return 'bg-green-100 text-green-800 border-green-200';
+            case 'partially_paid': return 'bg-yellow-100 text-yellow-800 border-yellow-200';
+            case 'pending': return 'bg-gray-100 text-gray-800 border-gray-200';
+            case 'cancelled': return 'bg-red-100 text-red-800 border-red-200';
+            default: return 'bg-gray-100 text-gray-800 border-gray-200';
+        }
+    };
+
+    const getStatusIcon = (status: string) => {
+        switch (status.toLowerCase()) {
+            case 'paid': return <CheckCircle className="h-4 w-4" />;
+            case 'partially_paid': return <Clock className="h-4 w-4" />;
+            case 'pending': return <AlertCircle className="h-4 w-4" />;
+            case 'cancelled': return <XCircle className="h-4 w-4" />;
+            default: return <AlertCircle className="h-4 w-4" />;
+        }
+    };
+
+    const headerBgClass =
+        booking.payment_status === 'cancelled' ? 'bg-gradient-to-r from-red-500 to-red-600' :
+        booking.payment_status === 'pending' ? 'bg-gradient-to-r from-yellow-500 to-orange-500' :
+        booking.payment_status === 'paid' ? 'bg-gradient-to-r from-green-500 to-emerald-600' :
+        'bg-gradient-to-r from-blue-500 to-indigo-600';
+
+    return (
+        <div className="border border-gray-200 rounded-2xl overflow-hidden hover:shadow-xl transition-all duration-300 transform hover:-translate-y-1">
+            {/* Header */}
+            <div className={`p-6 text-white ${headerBgClass}`}>
+                <div className="flex justify-between items-start">
+                    <div className="space-y-2">
+                        <div className="flex items-center space-x-3">
+                            <CreditCard className="h-6 w-6" />
+                            <h4 className="font-bold text-xl">Booking #{booking.id}</h4>
+                        </div>
+                        <div className="flex items-center space-x-2 text-white/90">
+                            <Calendar className="h-4 w-4" />
+                            <p className="text-sm">
+                                {booking.package?.name} • {booking.from_date} to {booking.to_date}
+                            </p>
+                        </div>
+                    </div>
+
+                    {/* Action Buttons */}
+                    <div className="flex flex-wrap gap-2">
+                        <button
+                            onClick={() => onDownloadInvoice(booking.id)}
+                            className="inline-flex items-center px-3 py-2 bg-white/20 hover:bg-white/30 text-white rounded-lg text-sm font-medium transition-all duration-200 backdrop-blur-sm"
+                            title="Download Invoice"
+                        >
+                            <Download className="h-4 w-4 mr-1" />
+                            Invoice
+                        </button>
+                        <button
+                            onClick={() => onEmailInvoice(booking.id)}
+                            className="inline-flex items-center px-3 py-2 bg-white/20 hover:bg-white/30 text-white rounded-lg text-sm font-medium transition-all duration-200 backdrop-blur-sm"
+                            title="Email Invoice"
+                        >
+                            <Mail className="h-4 w-4 mr-1" />
+                            Email
+                        </button>
+                        <button
+                            onClick={() => onGeneratePaymentLink(booking.id)}
+                            className="inline-flex items-center px-3 py-2 bg-white/20 hover:bg-white/30 text-white rounded-lg text-sm font-medium transition-all duration-200 backdrop-blur-sm"
+                            title="Generate Payment Link"
+                        >
+                            <Link2 className="h-4 w-4 mr-1" />
+                            Payment Link
+                        </button>
+                    </div>
+                </div>
+            </div>
+
+            {/* Body */}
+            <div className="p-6 bg-white">
+                {booking.payment_status === 'cancelled' && (
+                    <div className="mb-6 p-4 bg-red-50 border border-red-200 rounded-xl flex items-center space-x-3">
+                        <XCircle className="h-5 w-5 text-red-600 flex-shrink-0" />
+                        <span className="text-red-800 font-medium">This booking has been cancelled.</span>
+                    </div>
+                )}
+
+                {/* Payment Summary */}
+                <div className="grid grid-cols-1 lg:grid-cols-2 gap-6 mb-6">
+                    <div className="bg-gray-50 rounded-xl p-6 border border-gray-200">
+                        <h5 className="font-semibold text-gray-900 mb-4 flex items-center">
+                            <CreditCard className="h-5 w-5 mr-2 text-blue-600" />
+                            Payment Breakdown
+                        </h5>
+                        <div className="space-y-3">
+                            <div className="flex justify-between text-sm">
+                                <span className="text-gray-600">Package Price:</span>
+                                <span className="font-semibold text-gray-900">£{parseFloat(booking.price.toString()).toFixed(2)}</span>
+                            </div>
+                            <div className="flex justify-between text-sm">
+                                <span className="text-gray-600">Booking Fee:</span>
+                                <span className="font-semibold text-gray-900">£{parseFloat(booking.booking_price.toString()).toFixed(2)}</span>
+                            </div>
+                            <div className="flex justify-between font-bold text-lg border-t border-gray-200 pt-3">
+                                <span>Total Amount:</span>
+                                <span className="text-indigo-600">£{booking.payment_summary.total_price.toFixed(2)}</span>
+                            </div>
+                        </div>
+                    </div>
+
+                    <div className="bg-gray-50 rounded-xl p-6 border border-gray-200">
+                        <h5 className="font-semibold text-gray-900 mb-4 flex items-center">
+                            <CheckCircle className="h-5 w-5 mr-2 text-green-600" />
+                            Payment Status
+                        </h5>
+                        <div className="space-y-3">
+                            <div className="flex justify-between text-sm">
+                                <span className="text-gray-600">Total Paid:</span>
+                                <span className="font-semibold text-green-600">£{booking.payment_summary.total_paid.toFixed(2)}</span>
+                            </div>
+                            <div className="flex justify-between text-sm">
+                                <span className="text-gray-600">Remaining:</span>
+                                <span className="font-semibold text-red-600">£{booking.payment_summary.remaining_balance.toFixed(2)}</span>
+                            </div>
+                            <div className="mt-4">
+                                <div className="flex items-center justify-between text-sm mb-2">
+                                    <span className="text-gray-600">Progress</span>
+                                    <span className="font-semibold text-gray-900">{booking.payment_summary.payment_percentage.toFixed(1)}%</span>
+                                </div>
+                                <div className="w-full bg-gray-200 rounded-full h-3">
+                                    <div
+                                        className="bg-gradient-to-r from-green-500 to-emerald-600 h-3 rounded-full transition-all duration-500 ease-out"
+                                        style={{ width: `${Math.min(booking.payment_summary.payment_percentage, 100)}%` }}
+                                    ></div>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+
+                {/* Payment History */}
+                {booking.payments && booking.payments.length > 0 && (
+                    <div className="bg-gray-50 rounded-xl p-6 border border-gray-200">
+                        <h5 className="font-semibold text-gray-900 mb-4 flex items-center">
+                            <Clock className="h-5 w-5 mr-2 text-blue-600" />
+                            Payment History
+                        </h5>
+                        <div className="space-y-3">
+                            {booking.payments.map((payment) => (
+                                <div key={payment.id} className="flex justify-between items-center p-4 bg-white rounded-lg border border-gray-200 hover:border-gray-300 transition-all duration-200">
+                                    <div className="flex items-center space-x-4">
+                                        <div className="flex-shrink-0">
+                                            {getStatusIcon(payment.status)}
+                                        </div>
+                                        <div>
+                                            <div className="flex items-center space-x-2">
+                                                <span className="font-semibold text-gray-900">£{parseFloat(payment.amount).toFixed(2)}</span>
+                                                <span className="text-sm text-gray-500">
+                                                    {new Date(payment.created_at).toLocaleDateString('en-GB')}
+                                                </span>
+                                            </div>
+                                            {payment.payment_method && (
+                                                <span className="text-xs text-gray-500">
+                                                    via {payment.payment_method}
+                                                </span>
+                                            )}
+                                        </div>
+                                    </div>
+                                    <div className="flex items-center space-x-3">
+                                        <span className={`inline-flex items-center px-3 py-1 rounded-full text-xs font-semibold border ${getStatusBadgeClass(payment.status)}`}>
+                                            {payment.status}
+                                        </span>
+                                        <button
+                                            onClick={() => onUpdatePaymentStatus(payment.id, payment.status === 'Paid' ? 'Pending' : 'Paid')}
+                                            className={`inline-flex items-center px-3 py-1 rounded-lg text-xs font-medium transition-all duration-200 ${
+                                                payment.status === 'Paid'
+                                                    ? 'bg-yellow-100 text-yellow-800 hover:bg-yellow-200 border border-yellow-300'
+                                                    : 'bg-green-100 text-green-800 hover:bg-green-200 border border-green-300'
+                                            }`}
+                                        >
+                                            {payment.status === 'Paid' ? 'Reset' : 'Mark Paid'}
+                                        </button>
+                                    </div>
+                                </div>
+                            ))}
+                        </div>
+                    </div>
+                )}
+
+                {/* Empty Payment History */}
+                {(!booking.payments || booking.payments.length === 0) && (
+                    <div className="bg-gray-50 rounded-xl p-8 border border-gray-200 text-center">
+                        <CreditCard className="h-12 w-12 text-gray-300 mx-auto mb-3" />
+                        <p className="text-gray-500 font-medium">No payment history available</p>
+                        <p className="text-sm text-gray-400 mt-1">Payments will appear here once made</p>
+                    </div>
+                )}
+            </div>
+        </div>
+    );
+}
