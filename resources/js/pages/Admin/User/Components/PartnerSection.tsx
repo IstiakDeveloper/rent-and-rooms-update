@@ -98,8 +98,6 @@ export default function PartnerSection({ userId, packages = [], bankDetails, agr
         { type: 'electric_certificate', label: 'Electric Certificate', icon: 'bolt' },
         { type: 'landlord_certificate', label: 'Landlord Certificate', icon: 'home' },
         { type: 'building_insurance', label: 'Building Insurance', icon: 'shield-alt' },
-        { type: 'pat_certificate', label: 'PAT Certificate', icon: 'plug' },
-        { type: 'epc_certificate', label: 'EPC Certificate', icon: 'certificate' },
     ];
 
     return (

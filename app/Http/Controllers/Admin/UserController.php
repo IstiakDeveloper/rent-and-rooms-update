@@ -141,6 +141,9 @@ class UserController extends Controller
             'payments' => $payments,
             'paymentLinks' => $paymentLinks,
             'bookings' => $bookings,
+            'documents' => $user->documents ?? [],
+            'bankDetails' => $user->bankDetail ?? null,
+            'agreementDetails' => $user->agreementDetail ?? null,
         ]);
     }
 

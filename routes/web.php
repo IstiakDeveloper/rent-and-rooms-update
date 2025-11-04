@@ -1,8 +1,10 @@
 <?php
 
 use App\Http\Controllers\ProfileController;
+use App\Http\Controllers\Frontend\HomeController;
+use App\Http\Controllers\Frontend\PackageController as FrontendPackageController;
 use App\Http\Controllers\Admin\DashboardController;
-use App\Http\Controllers\Admin\PackageController;
+use App\Http\Controllers\Admin\PackageController as AdminPackageController;
 use App\Http\Controllers\Admin\UserController;
 use App\Http\Controllers\Admin\BookingController;
 use App\Http\Controllers\Admin\CountryController;
@@ -25,14 +27,13 @@ use Illuminate\Foundation\Application;
 use Illuminate\Support\Facades\Route;
 use Inertia\Inertia;
 
-Route::get('/', function () {
-    return Inertia::render('Welcome', [
-        'canLogin' => Route::has('login'),
-        'canRegister' => Route::has('register'),
-        'laravelVersion' => Application::VERSION,
-        'phpVersion' => PHP_VERSION,
-    ]);
-});
+// Home page
+Route::get('/', [HomeController::class, 'index'])->name('home');
+Route::post('/set-country', [HomeController::class, 'setCountry'])->name('set.country');
+
+// Properties (Frontend)
+Route::get('/properties', [FrontendPackageController::class, 'index'])->name('properties.index');
+Route::get('/properties/{partnerSlug}/{packageSlug}', [FrontendPackageController::class, 'show'])->name('properties.show');
 
 Route::get('/dashboard', function () {
     return Inertia::render('Dashboard');
@@ -50,11 +51,11 @@ Route::middleware(['auth'])->prefix('admin')->name('admin.')->group(function () 
     Route::get('/dashboard', [DashboardController::class, 'index'])->name('dashboard');
 
     // Packages
-    Route::resource('packages', PackageController::class);
-    Route::post('/packages/{package}/assign', [PackageController::class, 'assign'])->name('packages.assign');
-    Route::get('/api/cities-by-country', [PackageController::class, 'getCitiesByCountry'])->name('api.cities-by-country');
-    Route::get('/api/areas-by-city', [PackageController::class, 'getAreasByCity'])->name('api.areas-by-city');
-    Route::get('/api/properties-by-area', [PackageController::class, 'getPropertiesByArea'])->name('api.properties-by-area');
+    Route::resource('packages', AdminPackageController::class);
+    Route::post('/packages/{package}/assign', [AdminPackageController::class, 'assign'])->name('packages.assign');
+    Route::get('/api/cities-by-country', [AdminPackageController::class, 'getCitiesByCountry'])->name('api.cities-by-country');
+    Route::get('/api/areas-by-city', [AdminPackageController::class, 'getAreasByCity'])->name('api.areas-by-city');
+    Route::get('/api/properties-by-area', [AdminPackageController::class, 'getPropertiesByArea'])->name('api.properties-by-area');
 
     // Users
     Route::resource('users', UserController::class)->only(['index', 'show']);

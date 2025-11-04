@@ -15,7 +15,11 @@ interface User {
     name: string;
     email: string;
     phone: string;
-    role: string;
+    role?: string;
+    roles?: Array<{
+        id: number;
+        name: string;
+    }>;
 }
 
 interface Booking {
@@ -93,6 +97,9 @@ export default function Show({ user, bookings, packages, documents, bankDetails,
     const [editUserModalOpen, setEditUserModalOpen] = useState(false);
     const [milestoneModalOpen, setMilestoneModalOpen] = useState(false);
     const [selectedBookingId, setSelectedBookingId] = useState<number | null>(null);
+
+    // Check if user is a Partner
+    const isPartner = user.roles?.some(role => role.name.toLowerCase() === 'partner') || user.role?.toLowerCase() === 'partner';
 
     const handleDownloadInvoice = async (bookingId: number) => {
         try {
@@ -259,7 +266,7 @@ export default function Show({ user, bookings, packages, documents, bankDetails,
                                         <div className="mt-3">
                                             <span className="inline-flex items-center px-3 py-1 rounded-full text-sm font-medium bg-indigo-100 text-indigo-800">
                                                 <User className="h-4 w-4 mr-1" />
-                                                {user.role || 'User'}
+                                                Role: {user.roles && user.roles.length > 0 ? user.roles[0].name : (user.role || 'User')}
                                             </span>
                                         </div>
                                     </div>
@@ -278,64 +285,12 @@ export default function Show({ user, bookings, packages, documents, bankDetails,
                         </div>
                     </div>
 
-                    {/* User Information */}
+                    {/* User Information - Always show */}
                     <div className="mb-8">
                         <UserInfo user={user} onEdit={() => setEditUserModalOpen(true)} />
                     </div>
 
-                    {/* Bookings Section */}
-                    {bookings.length > 0 && (
-                        <div className="mb-8">
-                            <div className="bg-white rounded-2xl shadow-lg shadow-gray-200 border border-gray-200 overflow-hidden">
-                                <div className="p-8 border-b border-gray-200 bg-gradient-to-r from-blue-50 to-indigo-50">
-                                    <div className="flex items-center justify-between">
-                                        <div className="flex items-center space-x-3">
-                                            <div className="flex-shrink-0">
-                                                <div className="w-10 h-10 bg-gradient-to-r from-blue-500 to-indigo-600 rounded-lg flex items-center justify-center">
-                                                    <CreditCard className="h-5 w-5 text-white" />
-                                                </div>
-                                            </div>
-                                            <div>
-                                                <h2 className="text-2xl font-bold text-gray-900">User Bookings</h2>
-                                                <p className="text-sm text-gray-600 mt-1">Manage user bookings and payments</p>
-                                            </div>
-                                        </div>
-                                        <div className="text-sm text-gray-500 bg-white px-4 py-2 rounded-lg shadow-sm">
-                                            <span className="font-semibold text-gray-700">{bookings.length}</span> active booking(s)
-                                        </div>
-                                    </div>
-                                </div>
-
-                                <div className="p-8">
-                                    <div className="space-y-6">
-                                        {bookings.map((booking) => (
-                                            <BookingCard
-                                                key={booking.id}
-                                                booking={booking}
-                                                onDownloadInvoice={() => handleDownloadInvoice(booking.id)}
-                                                onEmailInvoice={() => handleEmailInvoice(booking.id)}
-                                                onGeneratePaymentLink={() => handleGeneratePaymentLink(booking.id)}
-                                                onUpdatePaymentStatus={(paymentId, status) =>
-                                                    handleUpdatePaymentStatus(paymentId, status)
-                                                }
-                                            />
-                                        ))}
-                                    </div>
-                                </div>
-                            </div>
-                        </div>
-                    )}
-
-                    {/* Empty State */}
-                    {bookings.length === 0 && (
-                        <div className="bg-white rounded-2xl shadow-lg shadow-gray-200 border border-gray-200 p-12 text-center">
-                            <CreditCard className="h-16 w-16 text-gray-300 mx-auto mb-4" />
-                            <h3 className="text-lg font-medium text-gray-900 mb-2">No Bookings Found</h3>
-                            <p className="text-gray-500">This user doesn't have any bookings yet.</p>
-                        </div>
-                    )}
-
-                    {/* Assigned Packages Section */}
+                    {/* Assigned Packages Section - Show for all users if packages exist */}
                     {packages && packages.length > 0 && (
                         <div className="mb-8">
                             <div className="bg-white rounded-2xl shadow-lg shadow-gray-200 border border-gray-200 overflow-hidden">
@@ -379,16 +334,74 @@ export default function Show({ user, bookings, packages, documents, bankDetails,
                         </div>
                     )}
 
-                    {/* Documents Section */}
-                    <div className="mb-8">
-                        <DocumentSection
-                            userId={user.id}
-                            documents={documents}
-                        />
-                    </div>
+                    {/* User-specific sections (show for non-Partners) */}
+                    {!isPartner && (
+                        <>
+                            {/* Bookings Section */}
+                            {bookings.length > 0 && (
+                        <div className="mb-8">
+                            <div className="bg-white rounded-2xl shadow-lg shadow-gray-200 border border-gray-200 overflow-hidden">
+                                <div className="p-8 border-b border-gray-200 bg-gradient-to-r from-blue-50 to-indigo-50">
+                                    <div className="flex items-center justify-between">
+                                        <div className="flex items-center space-x-3">
+                                            <div className="flex-shrink-0">
+                                                <div className="w-10 h-10 bg-gradient-to-r from-blue-500 to-indigo-600 rounded-lg flex items-center justify-center">
+                                                    <CreditCard className="h-5 w-5 text-white" />
+                                                </div>
+                                            </div>
+                                            <div>
+                                                <h2 className="text-2xl font-bold text-gray-900">User Bookings</h2>
+                                                <p className="text-sm text-gray-600 mt-1">Manage user bookings and payments</p>
+                                            </div>
+                                        </div>
+                                        <div className="text-sm text-gray-500 bg-white px-4 py-2 rounded-lg shadow-sm">
+                                            <span className="font-semibold text-gray-700">{bookings.length}</span> active booking(s)
+                                        </div>
+                                    </div>
+                                </div>
+
+                                <div className="p-8">
+                                    <div className="space-y-6">
+                                        {bookings.map((booking) => (
+                                            <BookingCard
+                                                key={booking.id}
+                                                booking={booking}
+                                                onDownloadInvoice={() => handleDownloadInvoice(booking.id)}
+                                                onEmailInvoice={() => handleEmailInvoice(booking.id)}
+                                                onGeneratePaymentLink={() => handleGeneratePaymentLink(booking.id)}
+                                                onUpdatePaymentStatus={(paymentId, status) =>
+                                                    handleUpdatePaymentStatus(paymentId, status)
+                                                }
+                                            />
+                                        ))}
+                                    </div>
+                                </div>
+                            </div>
+                        </div>
+                    )}
+
+                    {/* Empty State */}
+                            {/* Empty State */}
+                            {bookings.length === 0 && (
+                                <div className="bg-white rounded-2xl shadow-lg shadow-gray-200 border border-gray-200 p-12 text-center">
+                                    <CreditCard className="h-16 w-16 text-gray-300 mx-auto mb-4" />
+                                    <h3 className="text-lg font-medium text-gray-900 mb-2">No Bookings Found</h3>
+                                    <p className="text-gray-500">This user doesn't have any bookings yet.</p>
+                                </div>
+                            )}
+
+                            {/* Documents Section */}
+                            <div className="mb-8">
+                                <DocumentSection
+                                    userId={user.id}
+                                    documents={documents}
+                                />
+                            </div>
+                        </>
+                    )}
 
                     {/* Partner Section (for partners only) */}
-                    {user.role?.toLowerCase() === 'partner' && (
+                    {isPartner && (
                         <div className="mb-8">
                             <PartnerSection
                                 userId={user.id}

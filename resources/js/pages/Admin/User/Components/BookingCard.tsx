@@ -16,6 +16,14 @@ interface Booking {
         payment_method?: string;
         created_at: string;
     }>;
+    booking_payments?: Array<{
+        id: number;
+        amount: string;
+        payment_status: string;
+        due_date: string;
+        is_booking_fee: boolean;
+        milestone_type: string;
+    }>;
     payment_summary: {
         total_price: number;
         total_paid: number;
@@ -39,6 +47,11 @@ export default function BookingCard({
     onGeneratePaymentLink,
     onUpdatePaymentStatus
 }: Props) {
+    const formatDate = (dateString: string) => {
+        const date = new Date(dateString);
+        return date.toLocaleDateString('en-GB', { day: '2-digit', month: 'short', year: 'numeric' });
+    };
+
     const getStatusBadgeClass = (status: string) => {
         switch (status.toLowerCase()) {
             case 'paid': return 'bg-green-100 text-green-800 border-green-200';
@@ -78,7 +91,7 @@ export default function BookingCard({
                         <div className="flex items-center space-x-2 text-white/90">
                             <Calendar className="h-4 w-4" />
                             <p className="text-sm">
-                                {booking.package?.name} • {booking.from_date} to {booking.to_date}
+                                {booking.package?.name} • {formatDate(booking.from_date)} to {formatDate(booking.to_date)}
                             </p>
                         </div>
                     </div>
@@ -175,6 +188,54 @@ export default function BookingCard({
                     </div>
                 </div>
 
+                {/* Scheduled Payments */}
+                {booking.booking_payments && booking.booking_payments.length > 0 && (
+                    <div className="bg-gradient-to-br from-blue-50 to-indigo-50 rounded-xl p-6 border border-blue-200">
+                        <h5 className="font-semibold text-gray-900 mb-4 flex items-center">
+                            <Calendar className="h-5 w-5 mr-2 text-blue-600" />
+                            Payment Schedule
+                        </h5>
+                        <div className="space-y-3">
+                            {booking.booking_payments.map((payment) => (
+                                <div
+                                    key={payment.id}
+                                    className="flex items-center justify-between bg-white rounded-lg p-4 border border-blue-100"
+                                >
+                                    <div className="flex items-center space-x-3">
+                                        <div className="shrink-0">
+                                            {payment.payment_status === 'paid' ? (
+                                                <CheckCircle className="h-5 w-5 text-green-600" />
+                                            ) : (
+                                                <Clock className="h-5 w-5 text-yellow-600" />
+                                            )}
+                                        </div>
+                                        <div>
+                                            <div className="font-medium text-gray-900">
+                                                {payment.is_booking_fee ? 'Booking Fee' : `${payment.milestone_type} Payment`}
+                                            </div>
+                                            <div className="text-sm text-gray-500">
+                                                Due: {formatDate(payment.due_date)}
+                                            </div>
+                                        </div>
+                                    </div>
+                                    <div className="flex items-center space-x-3">
+                                        <span className="font-semibold text-gray-900">
+                                            £{parseFloat(payment.amount).toFixed(2)}
+                                        </span>
+                                        <span className={`px-3 py-1 rounded-full text-xs font-medium ${
+                                            payment.payment_status === 'paid'
+                                                ? 'bg-green-100 text-green-800'
+                                                : 'bg-yellow-100 text-yellow-800'
+                                        }`}>
+                                            {payment.payment_status}
+                                        </span>
+                                    </div>
+                                </div>
+                            ))}
+                        </div>
+                    </div>
+                )}
+
                 {/* Payment History */}
                 {booking.payments && booking.payments.length > 0 && (
                     <div className="bg-gray-50 rounded-xl p-6 border border-gray-200">
@@ -193,7 +254,7 @@ export default function BookingCard({
                                             <div className="flex items-center space-x-2">
                                                 <span className="font-semibold text-gray-900">£{parseFloat(payment.amount).toFixed(2)}</span>
                                                 <span className="text-sm text-gray-500">
-                                                    {new Date(payment.created_at).toLocaleDateString('en-GB')}
+                                                    {formatDate(payment.created_at)}
                                                 </span>
                                             </div>
                                             {payment.payment_method && (
