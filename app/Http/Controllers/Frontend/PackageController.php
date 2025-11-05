@@ -11,6 +11,7 @@ use App\Models\Amenity;
 use App\Models\Footer;
 use App\Models\Header;
 use Illuminate\Http\Request;
+use Illuminate\Support\Facades\Log;
 use Inertia\Inertia;
 
 class PackageController extends Controller
@@ -33,7 +34,7 @@ class PackageController extends Controller
             'area',
             'property',
             'photos',
-            'rooms.prices',
+            'rooms.roomPrices',
             'entireProperty.prices',
             'amenities',
             'maintains',
@@ -69,12 +70,12 @@ class PackageController extends Controller
         if ($request->filled('min_price') || $request->filled('max_price')) {
             $query->where(function($q) use ($request) {
                 // Check rooms prices
-                $q->whereHas('rooms.prices', function($roomQuery) use ($request) {
+                $q->whereHas('rooms.roomPrices', function($roomQuery) use ($request) {
                     if ($request->filled('min_price')) {
-                        $roomQuery->where('price', '>=', $request->min_price);
+                        $roomQuery->where('fixed_price', '>=', $request->min_price);
                     }
                     if ($request->filled('max_price')) {
-                        $roomQuery->where('price', '<=', $request->max_price);
+                        $roomQuery->where('fixed_price', '<=', $request->max_price);
                     }
                 })
                 // Or check entire property prices
@@ -102,9 +103,7 @@ class PackageController extends Controller
                     $q->where('amenities.id', $amenityId);
                 });
             }
-        }
-
-        // Sorting
+        }        // Sorting
         $sortBy = $request->get('sort_by', 'created_at');
         $sortOrder = $request->get('sort_order', 'desc');
 
@@ -112,13 +111,13 @@ class PackageController extends Controller
             case 'price_low':
                 $query->leftJoin('rooms', 'packages.id', '=', 'rooms.package_id')
                       ->leftJoin('room_prices', 'rooms.id', '=', 'room_prices.room_id')
-                      ->orderBy('room_prices.price', 'asc')
+                      ->orderBy('room_prices.fixed_price', 'asc')
                       ->select('packages.*');
                 break;
             case 'price_high':
                 $query->leftJoin('rooms', 'packages.id', '=', 'rooms.package_id')
                       ->leftJoin('room_prices', 'rooms.id', '=', 'room_prices.room_id')
-                      ->orderBy('room_prices.price', 'desc')
+                      ->orderBy('room_prices.fixed_price', 'desc')
                       ->select('packages.*');
                 break;
             case 'name':
@@ -175,53 +174,86 @@ class PackageController extends Controller
 
     public function show(Request $request, $partnerSlug, $packageSlug)
     {
-        // Extract package ID from slug (format: id-package-name)
-        $packageId = explode('-', $packageSlug)[0];
+        try {
+            // First, let's log what we're receiving
+            Log::info('Searching for package with:', [
+                'partnerSlug' => $partnerSlug,
+                'packageSlug' => $packageSlug
+            ]);
 
-        $package = Package::with([
-            'country',
-            'city',
-            'area',
-            'property',
-            'photos',
-            'rooms.prices',
-            'entireProperty.prices',
-            'amenities',
-            'maintains',
-            'instructions',
-            'creator',
-            'assignedPartner',
-            'bookings' => function($query) {
-                $query->where('status', 'confirmed')
-                      ->orWhere('status', 'pending');
-            }
-        ])->findOrFail($packageId);
+            $package = Package::with([
+                'creator',
+                'assignedPartner',
+                'country',
+                'city',
+                'area',
+                'property',
+                'rooms.roomPrices',
+                'photos',
+                'amenities',
+                'maintains',
+                'instructions',
+                'bookings' => function($query) {
+                    $query->whereNotIn('payment_status', ['cancelled', 'refunded']);
+                }
+            ])
+                ->where(function ($query) use ($partnerSlug) {
+                    $query->whereHas('assignedPartner', function ($q) use ($partnerSlug) {
+                        $q->whereRaw('LOWER(REPLACE(name, " ", "-")) = ?', [strtolower($partnerSlug)]);
+                    })
+                        ->orWhereHas('creator', function ($q) use ($partnerSlug) {
+                            $q->whereRaw('LOWER(REPLACE(name, " ", "-")) = ?', [strtolower($partnerSlug)]);
+                        });
+                })
+                ->where(function ($query) use ($packageSlug) {
+                    // Check if packageSlug is numeric (ID) or string (name)
+                    if (is_numeric($packageSlug)) {
+                        $query->where('id', $packageSlug);
+                    } else {
+                        // Extract the ID if it's in format "123-package-name"
+                        if (preg_match('/^(\d+)-/', $packageSlug, $matches)) {
+                            $query->where('id', $matches[1]);
+                        } else {
+                            $query->whereRaw('LOWER(REPLACE(name, " ", "-")) = ?', [strtolower($packageSlug)]);
+                        }
+                    }
+                })
+                ->firstOrFail();
 
-        // Get related packages (same city)
-        $relatedPackages = Package::with(['photos', 'city', 'area', 'rooms.prices', 'entireProperty.prices'])
-            ->where('status', 'active')
-            ->where('city_id', $package->city_id)
-            ->where('id', '!=', $package->id)
-            ->take(4)
-            ->get();
+            // Get related packages (same city)
+            $relatedPackages = Package::with(['photos', 'city', 'area', 'rooms.roomPrices'])
+                ->where('status', 'active')
+                ->where('city_id', $package->city_id)
+                ->where('id', '!=', $package->id)
+                ->take(4)
+                ->get();
 
-        // Load common data
-        $footer = Footer::with([
-            'footerSectionTwo',
-            'footerSectionThree',
-            'footerSectionFour.socialLinks'
-        ])->first();
-        $header = Header::first();
-        $countries = Country::all();
-        $selectedCountry = session('selectedCountry', 1);
+            // Load common data
+            $footer = Footer::with([
+                'footerSectionTwo',
+                'footerSectionThree',
+                'footerSectionFour.socialLinks'
+            ])->first();
+            $header = Header::first();
+            $countries = Country::all();
+            $selectedCountry = session('selectedCountry', 1);
 
-        return Inertia::render('Frontend/Properties/Show', [
-            'package' => $package,
-            'relatedPackages' => $relatedPackages,
-            'footer' => $footer,
-            'header' => $header,
-            'countries' => $countries,
-            'selectedCountry' => $selectedCountry,
-        ]);
+            return Inertia::render('Frontend/Properties/Show', [
+                'package' => $package,
+                'relatedPackages' => $relatedPackages,
+                'footer' => $footer,
+                'header' => $header,
+                'countries' => $countries,
+                'selectedCountry' => $selectedCountry,
+            ]);
+
+        } catch (\Exception $e) {
+            Log::error('Package not found:', [
+                'error' => $e->getMessage(),
+                'partnerSlug' => $partnerSlug,
+                'packageSlug' => $packageSlug
+            ]);
+            abort(404, 'Package not found.');
+        }
     }
 }

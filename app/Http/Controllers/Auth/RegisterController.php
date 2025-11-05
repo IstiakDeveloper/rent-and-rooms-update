@@ -11,6 +11,7 @@ use Illuminate\Support\Facades\Auth;
 use Illuminate\Support\Facades\Hash;
 use Illuminate\Validation\Rules;
 use Inertia\Inertia;
+use Illuminate\Http\JsonResponse;
 use Inertia\Response;
 
 class RegisterController extends Controller
@@ -28,16 +29,17 @@ class RegisterController extends Controller
      *
      * @throws \Illuminate\Validation\ValidationException
      */
-    public function store(Request $request): RedirectResponse
+    public function store(Request $request): RedirectResponse|JsonResponse
     {
         $request->validate([
             'name' => 'required|string|max:255',
-            'email' => 'required|string|lowercase|email|max:255|unique:'.User::class,
+            'email' => 'required|string|email|max:255|unique:users',
             'phone' => 'required|string|max:20',
-            'password' => ['required', 'confirmed', Rules\Password::defaults()],
-            'role' => 'required|string|in:User,Partner',
-            'agree_user_terms' => 'required_if:role,User|boolean',
-            'agree_partner_terms' => 'required_if:role,Partner|boolean',
+            'password' => 'required|string|min:8',
+            'password_confirmation' => 'required|string|same:password',
+            'type' => 'required|string|in:user,partner',
+            'address' => 'nullable|string|max:500',
+            'terms_accepted' => 'required|boolean|accepted',
         ]);
 
         $user = User::create([
@@ -45,22 +47,37 @@ class RegisterController extends Controller
             'email' => $request->email,
             'phone' => $request->phone,
             'password' => Hash::make($request->password),
+            'address' => $request->address,
         ]);
 
-        // Assign role using Spatie Laravel Permission if available
+        // Assign role using Spatie Laravel Permission
+        $role = ucfirst($request->type); // 'user' -> 'User', 'partner' -> 'Partner'
         if (method_exists($user, 'assignRole')) {
-            $user->assignRole($request->role);
+            $user->assignRole($role);
         }
 
         event(new Registered($user));
 
         Auth::login($user);
 
-        // Redirect based on user role
-        if ($request->role === 'Partner') {
-            return redirect()->route('dashboard')->with('message', 'Partner registration successful! Welcome to RentAndRoom.');
+        // Return JSON response for AJAX requests (modal)
+        if ($request->expectsJson()) {
+            return response()->json([
+                'success' => true,
+                'message' => 'Registration successful.',
+                'user' => [
+                    'name' => $user->name,
+                    'email' => $user->email,
+                    'roles' => $user->getRoleNames()
+                ]
+            ]);
         }
 
-        return redirect()->route('dashboard')->with('message', 'Registration successful! Welcome to RentAndRoom.');
+        // Redirect based on user role for regular form submissions
+        if ($request->type === 'partner') {
+            return redirect()->route('home')->with('message', 'Partner registration successful! Welcome to RentAndRoom.');
+        }
+
+        return redirect()->route('home')->with('message', 'Registration successful! Welcome to RentAndRoom.');
     }
 }

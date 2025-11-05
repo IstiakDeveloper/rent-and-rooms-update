@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import { Head, router } from '@inertiajs/react';
+import { Head, router, usePage } from '@inertiajs/react';
 import { Search, Home as HomeIcon, Users, Bath, MapPin, Sparkles, TrendingUp, Shield, Clock } from 'lucide-react';
 import GuestLayout from '@/layouts/GuestLayout';
 
@@ -27,7 +27,8 @@ interface RoomPrice {
 
 interface Room {
     id: number;
-    prices: RoomPrice[];
+    roomPrices?: RoomPrice[];
+    room_prices?: RoomPrice[]; // Support snake_case from Laravel
 }
 
 interface EntirePropertyPrice {
@@ -42,6 +43,17 @@ interface EntireProperty {
     prices: EntirePropertyPrice[];
 }
 
+interface User {
+    id: number;
+    name: string;
+    email: string;
+    role?: string;
+}
+
+interface AuthUser {
+    user: User | null;
+}
+
 interface Package {
     id: number;
     name: string;
@@ -52,6 +64,8 @@ interface Package {
     photos: Photo[];
     rooms: Room[];
     entireProperty?: EntireProperty;
+    creator?: User;
+    assignedPartner?: User;
 }
 
 interface HeroSection {
@@ -130,6 +144,19 @@ export default function Home({
     selectedCountry,
     filters = {}
 }: HomeProps) {
+    const { auth } = usePage<{ auth: AuthUser }>().props;
+
+    // Debug logging
+    console.log('Home page - Auth state:', auth);
+    console.log('Home page - User:', auth?.user);
+    // Debug logging
+    console.log('Home component data:', {
+        featuredPackages: featuredPackages?.length || 0,
+        packages: packages?.length || 0,
+        samplePackage: featuredPackages?.[0],
+        sampleRoom: featuredPackages?.[0]?.rooms?.[0]
+    });
+
     const [selectedCity, setSelectedCity] = useState<number | string>(filters.city_id || '');
     const [selectedArea, setSelectedArea] = useState<number | string>(filters.area_id || '');
     const [keyword, setKeyword] = useState(filters.keyword || '');
@@ -174,9 +201,12 @@ export default function Home({
     };
 
     const getFirstAvailablePrice = (prices: any[]) => {
+        if (!prices || !Array.isArray(prices)) return null;
+
+        // Priority order: Day, Week, Month
         const types = ['Day', 'Week', 'Month'];
         for (const type of types) {
-            const price = prices.find(p => p.type === type);
+            const price = prices.find(p => p && p.type === type);
             if (price) {
                 return { price, type };
             }
@@ -211,26 +241,63 @@ export default function Home({
     };
 
     const renderPackageCard = (pkg: Package, isFeatured = false) => {
-        const roomPrices = pkg.rooms?.flatMap(room => room.prices) || [];
+        // Validate package data
+        if (!pkg || !pkg.id || !pkg.name) {
+            console.warn('Invalid package data:', pkg);
+            return null;
+        }
+
+        // Generate proper URL using partner and package info
+        const getPackageUrl = () => {
+            // Get partner slug
+            const partner = pkg.assignedPartner || pkg.creator;
+            const partnerSlug = partner ? partner.name.toLowerCase().replace(/\s+/g, '-') : 'unknown';
+
+            // Get package slug with ID
+            const packageSlug = `${pkg.id}-${pkg.name.toLowerCase().replace(/\s+/g, '-')}`;
+
+            return `/properties/${partnerSlug}/${packageSlug}`;
+        };
+
+        // Safely get room prices - check both camelCase and snake_case
+        const roomPrices = pkg.rooms?.flatMap(room => {
+            if (room && (room.roomPrices || room.room_prices)) {
+                const prices = room.roomPrices || room.room_prices;
+                if (Array.isArray(prices)) {
+                    return prices.filter((price: any) => price && typeof price === 'object');
+                }
+            }
+            return [];
+        }) || [];
+
+        console.log('Package:', pkg.name);
+        console.log('Room Prices:', roomPrices);
+        console.log('Property Prices:', pkg.entireProperty?.prices);
+
         const roomPriceData = getFirstAvailablePrice(roomPrices);
         const roomPrice = roomPriceData?.price;
         const roomPriceType = roomPriceData?.type;
         const roomPriceIndicator = roomPriceType ? getPriceIndicator(roomPriceType) : '';
 
-        const propertyPrices = pkg.entireProperty?.prices || [];
+        // Safely get property prices
+        const propertyPrices = (pkg.entireProperty?.prices && Array.isArray(pkg.entireProperty.prices))
+            ? pkg.entireProperty.prices.filter(price => price && typeof price === 'object')
+            : [];
+
         const propertyPriceData = getFirstAvailablePrice(propertyPrices);
         const propertyPrice = propertyPriceData?.price;
         const propertyPriceType = propertyPriceData?.type;
         const propertyPriceIndicator = propertyPriceType ? getPropertyPriceIndicator(propertyPriceType) : '';
 
-        const cardSize = isFeatured ? 'h-44' : 'h-48';
+        console.log('Room Price Data:', roomPriceData);
+        console.log('Property Price Data:', propertyPriceData);        const cardSize = isFeatured ? 'h-44' : 'h-48';
         const textSize = isFeatured ? 'text-sm' : 'text-base';
         const priceSize = isFeatured ? 'text-base' : 'text-lg';
 
         return (
             <a
                 key={pkg.id}
-                href={`/packages/${pkg.id}`}
+                href={getPackageUrl()}
                 className="group bg-white rounded-2xl overflow-hidden border border-gray-200 hover:border-indigo-300 hover:shadow-2xl transition-all duration-500 transform hover:-translate-y-2"
             >
                 {/* Image with Gradient Overlay */}
@@ -277,39 +344,31 @@ export default function Home({
                             <div className="flex items-baseline gap-2">
                                 {propertyPrice.discount_price ? (
                                     <>
-                                        <span className="text-sm text-gray-400 line-through">
-                                            £{propertyPrice.fixed_price}
-                                        </span>
-                                        <span className="text-3xl font-bold bg-gradient-to-r from-indigo-600 to-purple-600 bg-clip-text text-transparent">
-                                            £{propertyPrice.discount_price}
-                                        </span>
+                                        <span className="text-sm text-gray-400 line-through">£{propertyPrice.fixed_price}</span>
+                                        <span className={`${priceSize} font-bold text-indigo-600`}>£{propertyPrice.discount_price}</span>
                                     </>
                                 ) : (
-                                    <span className="text-3xl font-bold bg-gradient-to-r from-indigo-600 to-purple-600 bg-clip-text text-transparent">
-                                        £{propertyPrice.fixed_price}
-                                    </span>
+                                    <span className={`${priceSize} font-bold text-indigo-600`}>£{propertyPrice.fixed_price}</span>
                                 )}
-                                <span className="text-sm text-gray-500 font-medium">{propertyPriceIndicator}</span>
+                                <span className="text-xs text-gray-500">{propertyPriceIndicator}</span>
                             </div>
                         ) : roomPrice ? (
                             <div className="flex items-baseline gap-2">
                                 {roomPrice.discount_price ? (
                                     <>
-                                        <span className="text-sm text-gray-400 line-through">
-                                            £{roomPrice.fixed_price}
-                                        </span>
-                                        <span className="text-3xl font-bold bg-gradient-to-r from-indigo-600 to-purple-600 bg-clip-text text-transparent">
-                                            £{roomPrice.discount_price}
-                                        </span>
+                                        <span className="text-sm text-gray-400 line-through">£{roomPrice.fixed_price}</span>
+                                        <span className={`${priceSize} font-bold text-indigo-600`}>£{roomPrice.discount_price}</span>
                                     </>
                                 ) : (
-                                    <span className="text-3xl font-bold bg-gradient-to-r from-indigo-600 to-purple-600 bg-clip-text text-transparent">
-                                        £{roomPrice.fixed_price}
-                                    </span>
+                                    <span className={`${priceSize} font-bold text-indigo-600`}>£{roomPrice.fixed_price}</span>
                                 )}
-                                <span className="text-sm text-gray-500 font-medium">{roomPriceIndicator}</span>
+                                <span className="text-xs text-gray-500">{roomPriceIndicator}</span>
                             </div>
-                        ) : null}
+                        ) : (
+                            <div className="flex items-baseline gap-2">
+                                <span className={`${priceSize} font-medium text-gray-500`}>Price on request</span>
+                            </div>
+                        )}
                     </div>
 
                     {/* Features */}
@@ -345,6 +404,7 @@ export default function Home({
             footer={footer}
             countries={countries}
             selectedCountry={selectedCountry}
+            auth={auth}
         >
             <Head title="Home - Find Your Perfect Property" />
 
@@ -466,7 +526,11 @@ export default function Home({
                         </div>
 
                         <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-8">
-                            {packages.map((pkg) => renderPackageCard(pkg, false))}
+                            {packages
+                                .filter(pkg => pkg && pkg.id && pkg.name)
+                                .map((pkg) => renderPackageCard(pkg, false))
+                                .filter(Boolean)
+                            }
                         </div>
                     </div>
                 </section>
@@ -560,7 +624,11 @@ export default function Home({
                     </div>
 
                     <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-8 mb-12">
-                        {featuredPackages.map((pkg) => renderPackageCard(pkg, true))}
+                        {featuredPackages && featuredPackages.length > 0 && featuredPackages
+                            .filter(pkg => pkg && pkg.id && pkg.name)
+                            .map((pkg) => renderPackageCard(pkg, true))
+                            .filter(Boolean)
+                        }
                     </div>
 
                     <div className="text-center">

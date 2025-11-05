@@ -5,14 +5,16 @@ import { Search, Filter, MapPin, Bed, Bath, Home, X as CloseIcon, Star, ChevronL
 
 interface Price {
     id: number;
-    price: number;
-    duration: string;
+    type: string;
+    fixed_price: number;
+    discount_price?: number;
 }
 
 interface Room {
     id: number;
     name: string;
-    prices: Price[];
+    roomPrices?: Price[];
+    room_prices?: Price[]; // Support snake_case from Laravel
 }
 
 interface EntireProperty {
@@ -40,6 +42,11 @@ interface Property {
     name: string;
 }
 
+interface User {
+    id: number;
+    name: string;
+}
+
 interface Package {
     id: number;
     name: string;
@@ -53,6 +60,8 @@ interface Package {
     photos: Photo[];
     rooms: Room[];
     entireProperty: EntireProperty | null;
+    creator?: User;
+    assignedPartner?: User;
 }
 
 interface Amenity {
@@ -109,16 +118,64 @@ export default function PropertiesIndex({
     countries,
     selectedCountry
 }: Props) {
+    // Debug log to check data
+    console.log('Properties Index data:', {
+        packages: packages?.data?.length || 0,
+        cities: cities?.length || 0,
+        areas: areas?.length || 0
+    });
+
     const [showMobileFilters, setShowMobileFilters] = useState(false);
     const [localFilters, setLocalFilters] = useState(filters);
 
     const getMinPrice = (pkg: Package): number => {
         const prices: number[] = [];
         pkg.rooms?.forEach(room => {
-            room.prices?.forEach(price => prices.push(price.price));
+            const roomPrices = room.roomPrices || room.room_prices || [];
+            roomPrices.forEach(price => prices.push(price.discount_price || price.fixed_price));
         });
-        pkg.entireProperty?.prices?.forEach(price => prices.push(price.price));
+        pkg.entireProperty?.prices?.forEach(price => prices.push(price.discount_price || price.fixed_price));
         return prices.length > 0 ? Math.min(...prices) : 0;
+    };
+
+    const getFirstAvailablePrice = (prices: any[]) => {
+        if (!prices || !Array.isArray(prices)) return null;
+
+        // Priority order: Day, Week, Month
+        const types = ['Day', 'Week', 'Month'];
+        for (const type of types) {
+            const price = prices.find(p => p && p.type === type);
+            if (price) {
+                return { price, type };
+            }
+        }
+        return null;
+    };
+
+    const getPriceIndicator = (type: string) => {
+        switch (type) {
+            case 'Day':
+                return '(P/N by Room)';
+            case 'Week':
+                return '(P/W by Room)';
+            case 'Month':
+                return '(P/M by Room)';
+            default:
+                return '';
+        }
+    };
+
+    const getPropertyPriceIndicator = (type: string) => {
+        switch (type) {
+            case 'Day':
+                return '(P/N by Property)';
+            case 'Week':
+                return '(P/W by Property)';
+            case 'Month':
+                return '(P/M by Property)';
+            default:
+                return '';
+        }
     };
 
     const applyFilters = () => {
@@ -251,7 +308,7 @@ export default function PropertiesIndex({
 
             <button
                 onClick={applyFilters}
-                className="w-full bg-gradient-to-r from-indigo-600 to-purple-600 text-white py-3 px-6 rounded-xl font-semibold hover:from-indigo-700 hover:to-purple-700 transition-all transform hover:scale-105 shadow-lg"
+                className="w-full bg-linear-to-r from-indigo-600 to-purple-600 text-white py-3 px-6 rounded-xl font-semibold hover:from-indigo-700 hover:to-purple-700 transition-all transform hover:scale-105 shadow-lg"
             >
                 Apply Filters
             </button>
@@ -263,7 +320,7 @@ export default function PropertiesIndex({
             <Head title="Properties - Find Your Perfect Home" />
 
             {/* Hero Section */}
-            <div className="relative bg-gradient-to-br from-indigo-600 via-purple-600 to-pink-600 text-white py-20 overflow-hidden">
+            <div className="relative bg-linear-to-br from-indigo-600 via-purple-600 to-pink-600 text-white py-20 overflow-hidden">
                 <div className="absolute inset-0">
                     <div className="absolute -top-1/2 -left-1/2 w-full h-full bg-white/5 rounded-full animate-pulse"></div>
                     <div className="absolute -bottom-1/2 -right-1/2 w-full h-full bg-white/5 rounded-full animate-pulse"></div>
@@ -316,7 +373,7 @@ export default function PropertiesIndex({
                     {/* Mobile Filter Button */}
                     <button
                         onClick={() => setShowMobileFilters(true)}
-                        className="lg:hidden fixed bottom-6 right-6 bg-gradient-to-r from-indigo-600 to-purple-600 text-white p-4 rounded-full shadow-2xl z-50"
+                        className="lg:hidden fixed bottom-6 right-6 bg-linear-to-r from-indigo-600 to-purple-600 text-white p-4 rounded-full shadow-2xl z-50"
                     >
                         <Filter className="h-6 w-6" />
                     </button>
@@ -362,17 +419,40 @@ export default function PropertiesIndex({
                         {packages.data.length > 0 ? (
                             <>
                                 <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-6 mb-8">
-                                    {packages.data.map(pkg => {
+                                    {packages.data
+                                        .filter(pkg => pkg && pkg.id && pkg.name) // Filter out invalid packages
+                                        .map(pkg => {
                                         const minPrice = getMinPrice(pkg);
-                                        const mainPhoto = pkg.photos[0]?.url;
+                                        const mainPhoto = pkg.photos?.[0]?.url;
+
+                                        // Get room prices
+                                        const roomPrices = pkg.rooms?.flatMap(room => (room.roomPrices || room.room_prices || [])) || [];
+                                        const roomPriceData = getFirstAvailablePrice(roomPrices);
+
+                                        // Get property prices
+                                        const propertyPrices = pkg.entireProperty?.prices || [];
+                                        const propertyPriceData = getFirstAvailablePrice(propertyPrices);
+
+                                        // Generate proper URL using partner and package info
+                                        const getPackageUrl = () => {
+                                            // Get partner slug
+                                            const partner = pkg.assignedPartner || pkg.creator;
+                                            const partnerSlug = partner ? partner.name.toLowerCase().replace(/\s+/g, '-') : 'unknown';
+
+                                            // Get package slug with ID
+                                            const packageSlug = `${pkg.id}-${pkg.name.toLowerCase().replace(/\s+/g, '-')}`;
+
+                                            return `/properties/${partnerSlug}/${packageSlug}`;
+                                        };
+
                                         return (
                                             <Link
                                                 key={pkg.id}
-                                                href={`/properties/property/${pkg.id}-${pkg.name.toLowerCase().replace(/\s+/g, '-')}`}
+                                                href={getPackageUrl()}
                                                 className="group bg-white rounded-2xl overflow-hidden border border-gray-200 hover:border-indigo-300 hover:shadow-2xl transition-all duration-500 transform hover:-translate-y-2"
                                             >
                                                 {/* Image with Gradient Overlay */}
-                                                <div className="relative h-64 overflow-hidden bg-gradient-to-br from-gray-100 to-gray-200">
+                                                <div className="relative h-64 overflow-hidden bg-linear-to-br from-gray-100 to-gray-200">
                                                     {mainPhoto ? (
                                                         <>
                                                             <img
@@ -380,7 +460,7 @@ export default function PropertiesIndex({
                                                                 alt={pkg.name}
                                                                 className="w-full h-full object-cover group-hover:scale-110 transition-transform duration-700"
                                                             />
-                                                            <div className="absolute inset-0 bg-gradient-to-t from-black/60 via-transparent to-transparent opacity-0 group-hover:opacity-100 transition-opacity duration-500"></div>
+                                                            <div className="absolute inset-0 bg-linear-to-t from-black/60 via-transparent to-transparent opacity-0 group-hover:opacity-100 transition-opacity duration-300"></div>
                                                         </>
                                                     ) : (
                                                         <div className="w-full h-full flex items-center justify-center">
@@ -406,16 +486,37 @@ export default function PropertiesIndex({
                                                     </p>
 
                                                     {/* Price Display */}
-                                                    {minPrice > 0 && (
-                                                        <div className="mb-4">
+                                                    <div className="mb-4">
+                                                        {propertyPriceData ? (
                                                             <div className="flex items-baseline gap-2">
-                                                                <span className="text-3xl font-bold bg-gradient-to-r from-indigo-600 to-purple-600 bg-clip-text text-transparent">
-                                                                    £{minPrice}
-                                                                </span>
-                                                                <span className="text-sm text-gray-500 font-medium">/week</span>
+                                                                {propertyPriceData.price.discount_price ? (
+                                                                    <>
+                                                                        <span className="text-sm text-gray-400 line-through">£{propertyPriceData.price.fixed_price}</span>
+                                                                        <span className="text-2xl font-bold text-indigo-600">£{propertyPriceData.price.discount_price}</span>
+                                                                    </>
+                                                                ) : (
+                                                                    <span className="text-2xl font-bold text-indigo-600">£{propertyPriceData.price.fixed_price}</span>
+                                                                )}
+                                                                <span className="text-xs text-gray-500">{getPropertyPriceIndicator(propertyPriceData.type)}</span>
                                                             </div>
-                                                        </div>
-                                                    )}
+                                                        ) : roomPriceData ? (
+                                                            <div className="flex items-baseline gap-2">
+                                                                {roomPriceData.price.discount_price ? (
+                                                                    <>
+                                                                        <span className="text-sm text-gray-400 line-through">£{roomPriceData.price.fixed_price}</span>
+                                                                        <span className="text-2xl font-bold text-indigo-600">£{roomPriceData.price.discount_price}</span>
+                                                                    </>
+                                                                ) : (
+                                                                    <span className="text-2xl font-bold text-indigo-600">£{roomPriceData.price.fixed_price}</span>
+                                                                )}
+                                                                <span className="text-xs text-gray-500">{getPriceIndicator(roomPriceData.type)}</span>
+                                                            </div>
+                                                        ) : (
+                                                            <div className="flex items-baseline gap-2">
+                                                                <span className="text-lg font-medium text-gray-500">Price on request</span>
+                                                            </div>
+                                                        )}
+                                                    </div>
 
                                                     {/* Features */}
                                                     <div className="flex items-center justify-between pt-4 border-t border-gray-100">
@@ -486,7 +587,7 @@ export default function PropertiesIndex({
                                                     disabled={!link.url}
                                                     className={`px-4 py-2 rounded-lg font-medium transition-all ${
                                                         link.active
-                                                            ? 'bg-gradient-to-r from-indigo-600 to-purple-600 text-white shadow-lg'
+                                                            ? 'bg-linear-to-r from-indigo-600 to-purple-600 text-white shadow-lg'
                                                             : link.url
                                                             ? 'bg-white border-2 border-gray-200 hover:border-indigo-600 text-gray-700'
                                                             : 'bg-gray-100 text-gray-400 cursor-not-allowed'
@@ -505,7 +606,7 @@ export default function PropertiesIndex({
                                 <p className="text-gray-600 mb-6">Try adjusting your filters or search criteria</p>
                                 <button
                                     onClick={resetFilters}
-                                    className="px-6 py-3 bg-gradient-to-r from-indigo-600 to-purple-600 text-white rounded-xl font-semibold hover:from-indigo-700 hover:to-purple-700 transition-all shadow-lg"
+                                                                        className="px-6 py-3 bg-linear-to-r from-indigo-600 to-purple-600 text-white rounded-xl font-semibold hover:from-indigo-700 hover:to-purple-700 transition-all shadow-lg hover:shadow-xl transform hover:-translate-y-1"
                                 >
                                     Clear All Filters
                                 </button>

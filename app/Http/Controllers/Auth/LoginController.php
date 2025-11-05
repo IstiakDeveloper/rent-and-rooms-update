@@ -11,6 +11,7 @@ use Illuminate\Support\Facades\RateLimiter;
 use Illuminate\Support\Str;
 use Illuminate\Validation\ValidationException;
 use Inertia\Inertia;
+use Illuminate\Http\JsonResponse;
 use Inertia\Response;
 
 class LoginController extends Controller
@@ -26,16 +27,16 @@ class LoginController extends Controller
     /**
      * Handle an incoming authentication request.
      */
-    public function store(Request $request): RedirectResponse
+    public function store(Request $request): RedirectResponse|JsonResponse
     {
-        $request->validate([
+        $credentials = $request->validate([
             'email' => 'required|string|email',
             'password' => 'required|string',
         ]);
 
         $this->ensureIsNotRateLimited($request);
 
-        if (! Auth::attempt($request->only('email', 'password'), $request->boolean('remember'))) {
+        if (! Auth::attempt($credentials, $request->boolean('remember'))) {
             RateLimiter::hit($this->throttleKey($request));
 
             throw ValidationException::withMessages([
@@ -47,13 +48,28 @@ class LoginController extends Controller
 
         $request->session()->regenerate();
 
-        // Redirect based on user role
+        // Return JSON response for AJAX requests (modal)
+        if ($request->expectsJson()) {
+            $user = Auth::user();
+
+            return response()->json([
+                'success' => true,
+                'message' => 'Login successful.',
+                'user' => [
+                    'name' => $user->name,
+                    'email' => $user->email,
+                    'roles' => method_exists($user, 'getRoleNames') ? $user->getRoleNames() : []
+                ]
+            ]);
+        }
+
+        // Redirect based on user role for regular form submissions
         $user = Auth::user();
         if (method_exists($user, 'hasRole') && $user->hasRole('Admin')) {
             return redirect()->intended(route('admin.dashboard'));
         }
 
-        return redirect()->intended(route('dashboard'));
+        return redirect()->intended(route('home'));
     }
 
     /**

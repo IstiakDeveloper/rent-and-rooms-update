@@ -153,7 +153,7 @@ class Package extends Model
         // Include ID in the package slug for better identification
         $packageSlug = $this->id . '-' . str_replace(' ', '-', strtolower($this->name));
 
-        return route('package.show', [
+        return route('properties.show', [
             'partnerSlug' => $partnerSlug,
             'packageSlug' => $packageSlug
         ]);

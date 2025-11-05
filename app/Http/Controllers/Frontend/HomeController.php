@@ -34,7 +34,7 @@ class HomeController extends Controller
         $noPackagesFound = false;
 
         if ($request->filled('city_id') || $request->filled('area_id') || $request->filled('keyword')) {
-            $query = Package::with(['country', 'city', 'area', 'rooms.prices', 'entireProperty.prices', 'photos']);
+            $query = Package::with(['country', 'city', 'area', 'rooms.roomPrices', 'entireProperty.prices', 'photos', 'creator', 'assignedPartner']);
 
             if ($selectedCountry) {
                 $query->where('country_id', $selectedCountry);
@@ -58,7 +58,7 @@ class HomeController extends Controller
         }
 
         // Featured packages
-        $featuredPackages = Package::with(['country', 'city', 'area', 'rooms.prices', 'entireProperty.prices', 'photos'])
+        $featuredPackages = Package::with(['country', 'city', 'area', 'rooms.roomPrices', 'entireProperty.prices', 'photos', 'creator', 'assignedPartner'])
             ->take(8)
             ->get();
 

@@ -1,7 +1,21 @@
 import React, { PropsWithChildren, useState } from 'react';
 import { Link, router } from '@inertiajs/react';
-import { Menu, X as CloseIcon, MapPin, Phone, Mail, Globe, Facebook, Instagram, Linkedin, Youtube } from 'lucide-react';
+import { Menu, X as CloseIcon, MapPin, Phone, Mail, Globe, Facebook, Instagram, Linkedin, Youtube, User, LogOut } from 'lucide-react';
 import axios from 'axios';
+import { AuthModalProvider, useAuthModal } from '@/contexts/AuthModalContext';
+import AuthModal from '@/components/AuthModal';
+
+interface User {
+    id: number;
+    name: string;
+    email: string;
+    role?: string;
+    status?: string;
+}
+
+interface AuthUser {
+    user: User | null;
+}
 
 interface Country {
     id: number;
@@ -80,17 +94,22 @@ interface GuestLayoutProps {
     footer?: Footer;
     countries?: Country[];
     selectedCountry?: number;
+    auth?: AuthUser;
+    children?: React.ReactNode;
 }
 
-export default function GuestLayout({
+function GuestLayout({
     children,
     header,
     footer,
     countries = [],
-    selectedCountry = 1
+    selectedCountry = 1,
+    auth
 }: PropsWithChildren<GuestLayoutProps>) {
     const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
     const [countryDropdownOpen, setCountryDropdownOpen] = useState(false);
+    const [userDropdownOpen, setUserDropdownOpen] = useState(false);
+    const { openLogin, openRegister } = useAuthModal();
 
     const handleCountryChange = async (countryId: number) => {
         try {
@@ -100,6 +119,10 @@ export default function GuestLayout({
         } catch (error) {
             console.error('Failed to set country:', error);
         }
+    };
+
+    const handleLogout = () => {
+        router.post('/logout');
     };
 
     const currentCountry = countries.find(c => c.id === selectedCountry);
@@ -193,37 +216,131 @@ export default function GuestLayout({
                         </Link>
 
                         {/* Desktop Navigation */}
-                        <nav className="hidden md:flex items-center space-x-8">
+                        <nav className="hidden md:flex items-center space-x-6">
                             <Link
                                 href="/"
-                                className="text-gray-700 hover:text-blue-600 font-medium transition-colors"
+                                className="relative text-gray-700 hover:text-blue-600 font-medium transition-all duration-300 px-3 py-2 rounded-lg hover:bg-blue-50 group"
                             >
                                 Home
+                                <span className="absolute bottom-0 left-1/2 w-0 h-0.5 bg-blue-600 transition-all duration-300 group-hover:w-8 group-hover:left-1/2 transform group-hover:-translate-x-1/2"></span>
                             </Link>
                             <Link
                                 href="/properties"
-                                className="text-gray-700 hover:text-blue-600 font-medium transition-colors"
+                                className="relative text-gray-700 hover:text-blue-600 font-medium transition-all duration-300 px-3 py-2 rounded-lg hover:bg-blue-50 group"
                             >
                                 Properties
+                                <span className="absolute bottom-0 left-1/2 w-0 h-0.5 bg-blue-600 transition-all duration-300 group-hover:w-8 group-hover:left-1/2 transform group-hover:-translate-x-1/2"></span>
                             </Link>
                             <Link
                                 href="/about"
-                                className="text-gray-700 hover:text-blue-600 font-medium transition-colors"
+                                className="relative text-gray-700 hover:text-blue-600 font-medium transition-all duration-300 px-3 py-2 rounded-lg hover:bg-blue-50 group"
                             >
                                 About
+                                <span className="absolute bottom-0 left-1/2 w-0 h-0.5 bg-blue-600 transition-all duration-300 group-hover:w-8 group-hover:left-1/2 transform group-hover:-translate-x-1/2"></span>
                             </Link>
                             <Link
                                 href="/contact"
-                                className="text-gray-700 hover:text-blue-600 font-medium transition-colors"
+                                className="relative text-gray-700 hover:text-blue-600 font-medium transition-all duration-300 px-3 py-2 rounded-lg hover:bg-blue-50 group"
                             >
                                 Contact
+                                <span className="absolute bottom-0 left-1/2 w-0 h-0.5 bg-blue-600 transition-all duration-300 group-hover:w-8 group-hover:left-1/2 transform group-hover:-translate-x-1/2"></span>
                             </Link>
-                            <Link
-                                href="/login"
-                                className="px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 font-medium transition-colors"
-                            >
-                                Login
-                            </Link>
+
+                            {auth?.user ? (
+                                /* Authenticated User Menu - Professional Design */
+                                <div className="relative ml-4">
+                                    <button
+                                        onClick={() => setUserDropdownOpen(!userDropdownOpen)}
+                                        className="flex items-center space-x-3 px-4 py-2 rounded-xl bg-gradient-to-r from-blue-50 to-indigo-50 hover:from-blue-100 hover:to-indigo-100 border border-blue-200 transition-all duration-300 hover:shadow-lg hover:shadow-blue-500/20 group"
+                                    >
+                                        <div className="w-10 h-10 rounded-full bg-gradient-to-br from-blue-500 via-indigo-600 to-purple-600 flex items-center justify-center text-white text-sm font-bold shadow-lg">
+                                            {auth.user.name.charAt(0).toUpperCase()}
+                                        </div>
+                                        <div className="flex flex-col items-start">
+                                            <span className="text-gray-800 font-semibold text-sm leading-tight">{auth.user.name}</span>
+                                            <span className="text-gray-500 text-xs">{auth.user.email}</span>
+                                        </div>
+                                        <svg className="w-4 h-4 text-gray-500 transition-transform duration-300 group-hover:rotate-180" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 9l-7 7-7-7" />
+                                        </svg>
+                                    </button>
+
+                                    {userDropdownOpen && (
+                                        <div className="absolute right-0 mt-3 w-64 bg-white rounded-2xl shadow-2xl border border-gray-100 py-2 z-50 backdrop-blur-sm">
+                                            <div className="px-4 py-3 border-b border-gray-100">
+                                                <div className="flex items-center space-x-3">
+                                                    <div className="w-12 h-12 rounded-full bg-gradient-to-br from-blue-500 via-indigo-600 to-purple-600 flex items-center justify-center text-white font-bold shadow-lg">
+                                                        {auth.user.name.charAt(0).toUpperCase()}
+                                                    </div>
+                                                    <div>
+                                                        <p className="font-semibold text-gray-900">{auth.user.name}</p>
+                                                        <p className="text-sm text-gray-500">{auth.user.email}</p>
+                                                        <p className="text-xs text-blue-600 font-medium mt-1">{auth.user.role || 'User'}</p>
+                                                    </div>
+                                                </div>
+                                            </div>
+                                            <div className="py-2">
+                                                <Link
+                                                    href="/dashboard"
+                                                    onClick={() => setUserDropdownOpen(false)}
+                                                    className="flex items-center space-x-3 px-4 py-3 text-sm text-gray-700 hover:bg-blue-50 hover:text-blue-700 transition-all duration-200 group"
+                                                >
+                                                    <div className="w-8 h-8 rounded-lg bg-blue-100 flex items-center justify-center group-hover:bg-blue-200 transition-colors">
+                                                        <svg className="w-4 h-4 text-blue-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                                            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M3 7v10a2 2 0 002 2h14a2 2 0 002-2V9a2 2 0 00-2-2H5a2 2 0 00-2-2z" />
+                                                            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M8 5a2 2 0 012-2h4a2 2 0 012 2v2H8V5z" />
+                                                        </svg>
+                                                    </div>
+                                                    <span className="font-medium">Dashboard</span>
+                                                </Link>
+                                                <Link
+                                                    href="/profile"
+                                                    onClick={() => setUserDropdownOpen(false)}
+                                                    className="flex items-center space-x-3 px-4 py-3 text-sm text-gray-700 hover:bg-green-50 hover:text-green-700 transition-all duration-200 group"
+                                                >
+                                                    <div className="w-8 h-8 rounded-lg bg-green-100 flex items-center justify-center group-hover:bg-green-200 transition-colors">
+                                                        <User className="h-4 w-4 text-green-600" />
+                                                    </div>
+                                                    <span className="font-medium">Profile Settings</span>
+                                                </Link>
+                                            </div>
+                                            <div className="border-t border-gray-100 pt-2">
+                                                <button
+                                                    onClick={() => {
+                                                        setUserDropdownOpen(false);
+                                                        handleLogout();
+                                                    }}
+                                                    className="w-full flex items-center space-x-3 px-4 py-3 text-sm text-red-600 hover:bg-red-50 hover:text-red-700 transition-all duration-200 group"
+                                                >
+                                                    <div className="w-8 h-8 rounded-lg bg-red-100 flex items-center justify-center group-hover:bg-red-200 transition-colors">
+                                                        <LogOut className="h-4 w-4 text-red-600" />
+                                                    </div>
+                                                    <span className="font-medium">Sign Out</span>
+                                                </button>
+                                            </div>
+                                        </div>
+                                    )}
+                                </div>
+                            ) : (
+                                /* Unauthenticated User - Professional Login Button */
+                                <div className="flex items-center space-x-3 ml-4">
+                                    <button
+                                        onClick={openLogin}
+                                        className="px-6 py-2.5 bg-gradient-to-r from-blue-600 to-indigo-600 hover:from-blue-700 hover:to-indigo-700 text-white rounded-xl font-semibold transition-all duration-300 transform hover:scale-105 hover:shadow-lg hover:shadow-blue-500/25 flex items-center space-x-2"
+                                    >
+                                        <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M11 16l-4-4m0 0l4-4m-4 4h14m-5 4v1a3 3 0 01-3 3H6a3 3 0 01-3-3V7a3 3 0 013-3h7a3 3 0 013 3v1" />
+                                        </svg>
+                                        <span>Sign In</span>
+                                    </button>
+                                    <button
+                                        onClick={openRegister}
+                                        className="px-6 py-2.5 border-2 border-blue-600 text-blue-600 hover:bg-blue-600 hover:text-white rounded-xl font-semibold transition-all duration-300 transform hover:scale-105"
+                                    >
+                                        Sign Up
+                                    </button>
+                                </div>
+                            )}
                         </nav>
 
                         {/* Mobile menu button */}
@@ -242,38 +359,115 @@ export default function GuestLayout({
 
                 {/* Mobile Navigation */}
                 {mobileMenuOpen && (
-                    <div className="md:hidden border-t border-gray-200 bg-white">
-                        <div className="px-4 pt-2 pb-3 space-y-1">
+                    <div className="md:hidden border-t border-gray-200 bg-white shadow-lg">
+                        <div className="px-4 pt-4 pb-3 space-y-2">
                             <Link
                                 href="/"
-                                className="block px-3 py-2 rounded-md text-base font-medium text-gray-700 hover:bg-gray-50 hover:text-blue-600"
+                                className="block px-4 py-3 rounded-xl text-base font-medium text-gray-700 hover:bg-blue-50 hover:text-blue-600 transition-all duration-200"
+                                onClick={() => setMobileMenuOpen(false)}
                             >
                                 Home
                             </Link>
                             <Link
                                 href="/properties"
-                                className="block px-3 py-2 rounded-md text-base font-medium text-gray-700 hover:bg-gray-50 hover:text-blue-600"
+                                className="block px-4 py-3 rounded-xl text-base font-medium text-gray-700 hover:bg-blue-50 hover:text-blue-600 transition-all duration-200"
+                                onClick={() => setMobileMenuOpen(false)}
                             >
                                 Properties
                             </Link>
                             <Link
                                 href="/about"
-                                className="block px-3 py-2 rounded-md text-base font-medium text-gray-700 hover:bg-gray-50 hover:text-blue-600"
+                                className="block px-4 py-3 rounded-xl text-base font-medium text-gray-700 hover:bg-blue-50 hover:text-blue-600 transition-all duration-200"
+                                onClick={() => setMobileMenuOpen(false)}
                             >
                                 About
                             </Link>
                             <Link
                                 href="/contact"
-                                className="block px-3 py-2 rounded-md text-base font-medium text-gray-700 hover:bg-gray-50 hover:text-blue-600"
+                                className="block px-4 py-3 rounded-xl text-base font-medium text-gray-700 hover:bg-blue-50 hover:text-blue-600 transition-all duration-200"
+                                onClick={() => setMobileMenuOpen(false)}
                             >
                                 Contact
                             </Link>
-                            <Link
-                                href="/login"
-                                className="block px-3 py-2 rounded-md text-base font-medium bg-blue-600 text-white hover:bg-blue-700"
-                            >
-                                Login
-                            </Link>
+
+                            {auth?.user ? (
+                                /* Authenticated User Mobile Menu - Professional */
+                                <div className="border-t border-gray-200 pt-4 mt-4">
+                                    <div className="flex items-center px-4 py-4 mb-3 bg-gradient-to-r from-blue-50 to-indigo-50 rounded-xl border border-blue-200">
+                                        <div className="w-12 h-12 rounded-full bg-gradient-to-br from-blue-500 via-indigo-600 to-purple-600 flex items-center justify-center text-white text-sm font-bold shadow-lg mr-4">
+                                            {auth.user.name.charAt(0).toUpperCase()}
+                                        </div>
+                                        <div className="flex-1">
+                                            <p className="text-base font-semibold text-gray-900">{auth.user.name}</p>
+                                            <p className="text-sm text-gray-600">{auth.user.email}</p>
+                                            <p className="text-xs text-blue-600 font-medium mt-1">{auth.user.role || 'User'}</p>
+                                        </div>
+                                    </div>
+
+                                    <div className="space-y-2">
+                                        <Link
+                                            href="/dashboard"
+                                            className="flex items-center space-x-3 px-4 py-3 rounded-xl text-base font-medium text-gray-700 hover:bg-blue-50 hover:text-blue-600 transition-all duration-200"
+                                            onClick={() => setMobileMenuOpen(false)}
+                                        >
+                                            <div className="w-8 h-8 rounded-lg bg-blue-100 flex items-center justify-center">
+                                                <svg className="w-4 h-4 text-blue-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M3 7v10a2 2 0 002 2h14a2 2 0 002-2V9a2 2 0 00-2-2H5a2 2 0 00-2-2z" />
+                                                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M8 5a2 2 0 012-2h4a2 2 0 012 2v2H8V5z" />
+                                                </svg>
+                                            </div>
+                                            <span>Dashboard</span>
+                                        </Link>
+                                        <Link
+                                            href="/profile"
+                                            className="flex items-center space-x-3 px-4 py-3 rounded-xl text-base font-medium text-gray-700 hover:bg-green-50 hover:text-green-600 transition-all duration-200"
+                                            onClick={() => setMobileMenuOpen(false)}
+                                        >
+                                            <div className="w-8 h-8 rounded-lg bg-green-100 flex items-center justify-center">
+                                                <User className="h-4 w-4 text-green-600" />
+                                            </div>
+                                            <span>Profile Settings</span>
+                                        </Link>
+                                        <button
+                                            onClick={() => {
+                                                setMobileMenuOpen(false);
+                                                handleLogout();
+                                            }}
+                                            className="w-full flex items-center space-x-3 px-4 py-3 rounded-xl text-base font-medium text-red-600 hover:bg-red-50 transition-all duration-200"
+                                        >
+                                            <div className="w-8 h-8 rounded-lg bg-red-100 flex items-center justify-center">
+                                                <LogOut className="h-4 w-4 text-red-600" />
+                                            </div>
+                                            <span>Sign Out</span>
+                                        </button>
+                                    </div>
+                                </div>
+                            ) : (
+                                /* Unauthenticated User Mobile Menu - Professional */
+                                <div className="border-t border-gray-200 pt-4 mt-4 space-y-3">
+                                    <button
+                                        onClick={() => {
+                                            setMobileMenuOpen(false);
+                                            openLogin();
+                                        }}
+                                        className="w-full px-6 py-3 bg-gradient-to-r from-blue-600 to-indigo-600 text-white rounded-xl font-semibold transition-all duration-300 transform active:scale-95 flex items-center justify-center space-x-2"
+                                    >
+                                        <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M11 16l-4-4m0 0l4-4m-4 4h14m-5 4v1a3 3 0 01-3 3H6a3 3 0 01-3-3V7a3 3 0 013-3h7a3 3 0 013 3v1" />
+                                        </svg>
+                                        <span>Sign In</span>
+                                    </button>
+                                    <button
+                                        onClick={() => {
+                                            setMobileMenuOpen(false);
+                                            openRegister();
+                                        }}
+                                        className="w-full px-6 py-3 border-2 border-blue-600 text-blue-600 rounded-xl font-semibold transition-all duration-300 transform active:scale-95"
+                                    >
+                                        Create Account
+                                    </button>
+                                </div>
+                            )}
                         </div>
                     </div>
                 )}
@@ -510,3 +704,38 @@ export default function GuestLayout({
         </div>
     );
 }
+
+// Wrapper component with AuthModal context
+function GuestLayoutWithModal(props: GuestLayoutProps) {
+    return (
+        <AuthModalProvider>
+            <GuestLayoutContent {...props} />
+        </AuthModalProvider>
+    );
+}
+
+// Inner component that uses the context
+function GuestLayoutContent({ children, header, footer, countries, selectedCountry, auth }: GuestLayoutProps) {
+    const { isOpen, activeTab, closeModal } = useAuthModal();
+
+    return (
+        <>
+            <GuestLayout
+                header={header}
+                footer={footer}
+                countries={countries}
+                selectedCountry={selectedCountry}
+                auth={auth}
+            >
+                {children}
+            </GuestLayout>
+            <AuthModal
+                isOpen={isOpen}
+                onClose={closeModal}
+                initialTab={activeTab}
+            />
+        </>
+    );
+}
+
+export default GuestLayoutWithModal;
