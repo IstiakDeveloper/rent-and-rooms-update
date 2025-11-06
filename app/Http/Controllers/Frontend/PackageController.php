@@ -175,12 +175,6 @@ class PackageController extends Controller
     public function show(Request $request, $partnerSlug, $packageSlug)
     {
         try {
-            // First, let's log what we're receiving
-            Log::info('Searching for package with:', [
-                'partnerSlug' => $partnerSlug,
-                'packageSlug' => $packageSlug
-            ]);
-
             $package = Package::with([
                 'creator',
                 'assignedPartner',
@@ -191,7 +185,13 @@ class PackageController extends Controller
                 'rooms.roomPrices',
                 'photos',
                 'amenities',
-                'maintains',
+                'maintains.maintainType',
+                'packageAmenities' => function($query) {
+                    $query->with('amenity');
+                },
+                'packageMaintains' => function($query) {
+                    $query->with('maintain.maintainType');
+                },
                 'instructions',
                 'bookings' => function($query) {
                     $query->whereNotIn('payment_status', ['cancelled', 'refunded']);
@@ -238,6 +238,15 @@ class PackageController extends Controller
             $countries = Country::all();
             $selectedCountry = session('selectedCountry', 1);
 
+            // Debug: Log package data
+            Log::info('Package Show - Services Data:', [
+                'package_id' => $package->id,
+                'amenities' => $package->amenities ? $package->amenities->toArray() : null,
+                'maintains' => $package->maintains ? $package->maintains->toArray() : null,
+                'packageAmenities' => $package->packageAmenities ? $package->packageAmenities->toArray() : null,
+                'packageMaintains' => $package->packageMaintains ? $package->packageMaintains->toArray() : null,
+            ]);
+
             return Inertia::render('Frontend/Properties/Show', [
                 'package' => $package,
                 'relatedPackages' => $relatedPackages,
@@ -248,11 +257,6 @@ class PackageController extends Controller
             ]);
 
         } catch (\Exception $e) {
-            Log::error('Package not found:', [
-                'error' => $e->getMessage(),
-                'partnerSlug' => $partnerSlug,
-                'packageSlug' => $packageSlug
-            ]);
             abort(404, 'Package not found.');
         }
     }

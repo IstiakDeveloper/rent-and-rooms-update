@@ -75,11 +75,20 @@ class Package extends Model
             ->withPivot('is_paid', 'price');
     }
 
+    public function packageMaintains()
+    {
+        return $this->hasMany(PackageMaintain::class);
+    }
 
     public function amenities(): BelongsToMany
     {
         return $this->belongsToMany(Amenity::class, 'package_amenities')
             ->withPivot('is_paid', 'price');
+    }
+
+    public function packageAmenities()
+    {
+        return $this->hasMany(PackageAmenity::class);
     }
     public function user()
     {

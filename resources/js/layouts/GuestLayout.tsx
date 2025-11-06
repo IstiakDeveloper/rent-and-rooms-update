@@ -109,9 +109,7 @@ function GuestLayout({
     const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
     const [countryDropdownOpen, setCountryDropdownOpen] = useState(false);
     const [userDropdownOpen, setUserDropdownOpen] = useState(false);
-    const { openLogin, openRegister } = useAuthModal();
-
-    const handleCountryChange = async (countryId: number) => {
+    const { openLogin, openRegister } = useAuthModal();    const handleCountryChange = async (countryId: number) => {
         try {
             await axios.post('/set-country', { country_id: countryId });
             router.reload();
@@ -201,21 +199,33 @@ function GuestLayout({
                 <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
                     <div className="flex items-center justify-between h-16">
                         {/* Logo */}
-                        <Link href="/" className="flex-shrink-0">
-                            {header?.logo ? (
+                        <Link href="/" className="shrink-0">
+                            {header && header.logo ? (
                                 <img
                                     src={`/storage/${header.logo}`}
-                                    alt="Logo"
+                                    alt="RentAndRooms Logo"
                                     className="h-10 w-auto"
+                                    onError={(e) => {
+                                        console.error('Logo failed to load:', `/storage/${header.logo}`);
+                                        // Hide the broken image and show fallback text
+                                        const imgElement = e.currentTarget;
+                                        imgElement.style.display = 'none';
+
+                                        // Create fallback div if it doesn't exist
+                                        if (!imgElement.nextElementSibling) {
+                                            const fallbackDiv = document.createElement('div');
+                                            fallbackDiv.className = 'text-2xl font-bold text-blue-600';
+                                            fallbackDiv.textContent = 'RentAndRooms';
+                                            imgElement.parentElement!.appendChild(fallbackDiv);
+                                        }
+                                    }}
                                 />
                             ) : (
                                 <div className="text-2xl font-bold text-blue-600">
                                     RentAndRooms
                                 </div>
                             )}
-                        </Link>
-
-                        {/* Desktop Navigation */}
+                        </Link>                        {/* Desktop Navigation */}
                         <nav className="hidden md:flex items-center space-x-6">
                             <Link
                                 href="/"

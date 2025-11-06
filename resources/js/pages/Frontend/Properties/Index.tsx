@@ -1,5 +1,5 @@
 import React, { useState } from 'react';
-import { Head, Link, router } from '@inertiajs/react';
+import { Head, Link, router, usePage } from '@inertiajs/react';
 import GuestLayout from '@/layouts/GuestLayout';
 import { Search, Filter, MapPin, Bed, Bath, Home, X as CloseIcon, Star, ChevronLeft, ChevronRight, Users } from 'lucide-react';
 
@@ -45,6 +45,13 @@ interface Property {
 interface User {
     id: number;
     name: string;
+    email: string;
+    role?: string;
+    status?: string;
+}
+
+interface AuthUser {
+    user: User | null;
 }
 
 interface Package {
@@ -104,6 +111,7 @@ interface Props {
     header: any;
     countries: any[];
     selectedCountry: number;
+    auth?: AuthUser;
 }
 
 export default function PropertiesIndex({
@@ -116,8 +124,12 @@ export default function PropertiesIndex({
     footer,
     header,
     countries,
-    selectedCountry
+    selectedCountry,
+    auth
 }: Props) {
+    // Extract auth data from usePage hook if not provided as prop
+    const { auth: pageAuth } = usePage<{ auth: AuthUser }>().props;
+    const currentAuth = auth || pageAuth;
     // Debug log to check data
     console.log('Properties Index data:', {
         packages: packages?.data?.length || 0,
@@ -128,14 +140,54 @@ export default function PropertiesIndex({
     const [showMobileFilters, setShowMobileFilters] = useState(false);
     const [localFilters, setLocalFilters] = useState(filters);
 
-    const getMinPrice = (pkg: Package): number => {
-        const prices: number[] = [];
+    // Smart pricing - returns per day rate
+    const getSmartDailyPrice = (pkg: Package): { price: number; type: string; calculated: boolean } | null => {
+        let allPrices: any[] = [];
+
+        // Collect all prices from rooms and entire property
         pkg.rooms?.forEach(room => {
             const roomPrices = room.roomPrices || room.room_prices || [];
-            roomPrices.forEach(price => prices.push(price.discount_price || price.fixed_price));
+            allPrices = [...allPrices, ...roomPrices];
         });
-        pkg.entireProperty?.prices?.forEach(price => prices.push(price.discount_price || price.fixed_price));
-        return prices.length > 0 ? Math.min(...prices) : 0;
+
+        if (pkg.entireProperty?.prices) {
+            allPrices = [...allPrices, ...pkg.entireProperty.prices];
+        }
+
+        if (allPrices.length === 0) return null;
+
+        // Find price types
+        const dayPrice = allPrices.find(p => p.type === 'Day');
+        const weekPrice = allPrices.find(p => p.type === 'Week');
+        const monthPrice = allPrices.find(p => p.type === 'Month');
+
+        // Return per day rate with priority: Day > Week/7 > Month/30
+        if (dayPrice) {
+            return {
+                price: dayPrice.discount_price || dayPrice.fixed_price,
+                type: 'Day',
+                calculated: false
+            };
+        } else if (weekPrice) {
+            return {
+                price: (weekPrice.discount_price || weekPrice.fixed_price) / 7,
+                type: 'Week',
+                calculated: true
+            };
+        } else if (monthPrice) {
+            return {
+                price: (monthPrice.discount_price || monthPrice.fixed_price) / 30,
+                type: 'Month',
+                calculated: true
+            };
+        }
+
+        return null;
+    };
+
+    const getMinPrice = (pkg: Package): number => {
+        const priceInfo = getSmartDailyPrice(pkg);
+        return priceInfo ? priceInfo.price : 0;
     };
 
     const getFirstAvailablePrice = (prices: any[]) => {
@@ -316,7 +368,7 @@ export default function PropertiesIndex({
     );
 
     return (
-        <GuestLayout footer={footer} header={header} countries={countries} selectedCountry={selectedCountry}>
+        <GuestLayout footer={footer} header={header} countries={countries} selectedCountry={selectedCountry} auth={currentAuth}>
             <Head title="Properties - Find Your Perfect Home" />
 
             {/* Hero Section */}
@@ -485,37 +537,34 @@ export default function PropertiesIndex({
                                                         {pkg.address}
                                                     </p>
 
-                                                    {/* Price Display */}
+                                                    {/* Smart Price Display - Per Day */}
                                                     <div className="mb-4">
-                                                        {propertyPriceData ? (
-                                                            <div className="flex items-baseline gap-2">
-                                                                {propertyPriceData.price.discount_price ? (
-                                                                    <>
-                                                                        <span className="text-sm text-gray-400 line-through">£{propertyPriceData.price.fixed_price}</span>
-                                                                        <span className="text-2xl font-bold text-indigo-600">£{propertyPriceData.price.discount_price}</span>
-                                                                    </>
-                                                                ) : (
-                                                                    <span className="text-2xl font-bold text-indigo-600">£{propertyPriceData.price.fixed_price}</span>
-                                                                )}
-                                                                <span className="text-xs text-gray-500">{getPropertyPriceIndicator(propertyPriceData.type)}</span>
-                                                            </div>
-                                                        ) : roomPriceData ? (
-                                                            <div className="flex items-baseline gap-2">
-                                                                {roomPriceData.price.discount_price ? (
-                                                                    <>
-                                                                        <span className="text-sm text-gray-400 line-through">£{roomPriceData.price.fixed_price}</span>
-                                                                        <span className="text-2xl font-bold text-indigo-600">£{roomPriceData.price.discount_price}</span>
-                                                                    </>
-                                                                ) : (
-                                                                    <span className="text-2xl font-bold text-indigo-600">£{roomPriceData.price.fixed_price}</span>
-                                                                )}
-                                                                <span className="text-xs text-gray-500">{getPriceIndicator(roomPriceData.type)}</span>
-                                                            </div>
-                                                        ) : (
-                                                            <div className="flex items-baseline gap-2">
-                                                                <span className="text-lg font-medium text-gray-500">Price on request</span>
-                                                            </div>
-                                                        )}
+                                                        {(() => {
+                                                            const smartPrice = getSmartDailyPrice(pkg);
+                                                            if (!smartPrice) {
+                                                                return (
+                                                                    <div className="flex items-baseline gap-2">
+                                                                        <span className="text-lg font-medium text-gray-500">Price on request</span>
+                                                                    </div>
+                                                                );
+                                                            }
+
+                                                            return (
+                                                                <div className="flex items-baseline gap-2">
+                                                                    <span className="text-2xl font-bold text-indigo-600">
+                                                                        £{smartPrice.price.toFixed(2)}
+                                                                    </span>
+                                                                    <span className="text-sm text-gray-500">
+                                                                        per day
+                                                                        {smartPrice.calculated && (
+                                                                            <span className="text-xs ml-1">
+                                                                                (from {smartPrice.type.toLowerCase()})
+                                                                            </span>
+                                                                        )}
+                                                                    </span>
+                                                                </div>
+                                                            );
+                                                        })()}
                                                     </div>
 
                                                     {/* Features */}

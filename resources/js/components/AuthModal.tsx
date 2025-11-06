@@ -185,7 +185,7 @@ export default function AuthModal({ isOpen, onClose, initialTab = 'login' }: Aut
         <div className="fixed inset-0 z-50 flex items-center justify-center p-4">
             {/* Backdrop */}
             <div
-                className="absolute inset-0 bg-black bg-opacity-50 backdrop-blur-sm"
+                className="absolute inset-0 bg-black/50 backdrop-blur-sm"
                 onClick={onClose}
             />
 
@@ -502,7 +502,15 @@ export default function AuthModal({ isOpen, onClose, initialTab = 'login' }: Aut
                                         type="checkbox"
                                         id="terms"
                                         checked={registrationData.terms_accepted}
-                                        onChange={(e) => setRegistrationData(prev => ({ ...prev, terms_accepted: e.target.checked }))}
+                                        onChange={(e) => {
+                                            if (e.target.checked) {
+                                                // If checking the box, open terms modal first
+                                                setShowTerms(true);
+                                            } else {
+                                                // If unchecking, just uncheck
+                                                setRegistrationData(prev => ({ ...prev, terms_accepted: false }));
+                                            }
+                                        }}
                                         className="mt-1 rounded border-gray-300 text-indigo-600 focus:ring-indigo-500"
                                     />
                                     <label htmlFor="terms" className="text-sm text-gray-600">
@@ -543,8 +551,12 @@ export default function AuthModal({ isOpen, onClose, initialTab = 'login' }: Aut
             {showTerms && (
                 <div className="fixed inset-0 z-60 flex items-center justify-center p-4">
                     <div
-                        className="absolute inset-0 bg-black bg-opacity-50"
-                        onClick={() => setShowTerms(false)}
+                        className="absolute inset-0 bg-black/50"
+                        onClick={() => {
+                            setShowTerms(false);
+                            // Automatically check the terms when user closes the modal by clicking backdrop
+                            setRegistrationData(prev => ({ ...prev, terms_accepted: true }));
+                        }}
                     />
                     <div className="relative bg-white rounded-xl shadow-2xl w-full max-w-2xl max-h-[80vh] overflow-y-auto">
                         <div className="sticky top-0 bg-white border-b border-gray-200 px-6 py-4 rounded-t-xl">
@@ -553,7 +565,11 @@ export default function AuthModal({ isOpen, onClose, initialTab = 'login' }: Aut
                                     Terms and Conditions {registrationType === 'partner' && 'for Partners'}
                                 </h3>
                                 <button
-                                    onClick={() => setShowTerms(false)}
+                                    onClick={() => {
+                                        setShowTerms(false);
+                                        // Automatically check the terms when user closes the modal
+                                        setRegistrationData(prev => ({ ...prev, terms_accepted: true }));
+                                    }}
                                     className="p-2 hover:bg-gray-100 rounded-full"
                                 >
                                     <X className="w-5 h-5 text-gray-500" />
@@ -594,10 +610,14 @@ export default function AuthModal({ isOpen, onClose, initialTab = 'login' }: Aut
                             </div>
                             <div className="mt-6 pt-4 border-t border-gray-200">
                                 <button
-                                    onClick={() => setShowTerms(false)}
+                                    onClick={() => {
+                                        setShowTerms(false);
+                                        // Automatically check the terms when user closes the modal
+                                        setRegistrationData(prev => ({ ...prev, terms_accepted: true }));
+                                    }}
                                     className="w-full bg-indigo-600 hover:bg-indigo-700 text-white font-medium py-2 px-4 rounded-lg transition-colors"
                                 >
-                                    Close
+                                    Accept & Close
                                 </button>
                             </div>
                         </div>

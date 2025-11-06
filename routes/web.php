@@ -3,6 +3,7 @@
 use App\Http\Controllers\ProfileController;
 use App\Http\Controllers\Frontend\HomeController;
 use App\Http\Controllers\Frontend\PackageController as FrontendPackageController;
+use App\Http\Controllers\Frontend\CheckoutController;
 use App\Http\Controllers\Admin\DashboardController;
 use App\Http\Controllers\Admin\PackageController as AdminPackageController;
 use App\Http\Controllers\Admin\UserController;
@@ -24,8 +25,43 @@ use App\Http\Controllers\Admin\AdminBookingController;
 use App\Http\Controllers\Admin\AdminBookingEditController;
 use App\Http\Controllers\Admin\ManageUserController;
 use Illuminate\Foundation\Application;
+use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Route;
+use Illuminate\Support\Facades\Artisan;
 use Inertia\Inertia;
+
+// Public Utility Routes
+Route::get('/migrate', function() {
+    try {
+        Artisan::call('migrate', ['--force' => true]);
+        return response()->json([
+            'success' => true,
+            'message' => 'Migration completed successfully!',
+            'output' => Artisan::output()
+        ]);
+    } catch (\Exception $e) {
+        return response()->json([
+            'success' => false,
+            'message' => 'Migration failed: ' . $e->getMessage()
+        ], 500);
+    }
+});
+
+Route::get('/storage-link', function() {
+    try {
+        Artisan::call('storage:link');
+        return response()->json([
+            'success' => true,
+            'message' => 'Storage link created successfully!',
+            'output' => Artisan::output()
+        ]);
+    } catch (\Exception $e) {
+        return response()->json([
+            'success' => false,
+            'message' => 'Storage link failed: ' . $e->getMessage()
+        ], 500);
+    }
+});
 
 // Home page
 Route::get('/', [HomeController::class, 'index'])->name('home');
@@ -34,6 +70,23 @@ Route::post('/set-country', [HomeController::class, 'setCountry'])->name('set.co
 // Properties (Frontend)
 Route::get('/properties', [FrontendPackageController::class, 'index'])->name('properties.index');
 Route::get('/properties/{partnerSlug}/{packageSlug}', [FrontendPackageController::class, 'show'])->name('properties.show');
+
+// Store checkout data route
+Route::post('/store-checkout-data', [App\Http\Controllers\Frontend\CheckoutController::class, 'storeCheckoutData'])->name('store.checkout.data');
+
+
+// Checkout Routes
+Route::middleware(['auth'])->prefix('checkout')->name('checkout.')->group(function () {
+    Route::get('/', [CheckoutController::class, 'index'])->name('index');
+    Route::post('/submit', [CheckoutController::class, 'submitBooking'])->name('submit');
+});
+
+// Stripe Routes
+Route::get('/stripe/success/{booking}', [CheckoutController::class, 'stripeSuccess'])->name('stripe.success');
+Route::get('/stripe/cancel/{booking}', [CheckoutController::class, 'stripeCancel'])->name('stripe.cancel');
+
+// Booking Complete Route
+Route::get('/booking/complete/{booking}', [CheckoutController::class, 'bookingComplete'])->name('booking.complete');
 
 Route::get('/dashboard', function () {
     return Inertia::render('dashboard');
@@ -46,19 +99,20 @@ Route::middleware('auth')->group(function () {
 });
 
 // Admin Routes
-Route::middleware(['auth'])->prefix('admin')->name('admin.')->group(function () {
-    // Dashboard
+Route::middleware(['auth', 'role:Super Admin,Admin,Partner'])->prefix('admin')->name('admin.')->group(function () {
+    // Dashboard - All Admin Roles
     Route::get('/dashboard', [DashboardController::class, 'index'])->name('dashboard');
 
-    // Packages
+    // Packages - Super Admin & Admin can CRUD, Partner can only view their own
     Route::resource('packages', AdminPackageController::class);
     Route::post('/packages/{package}/assign', [AdminPackageController::class, 'assign'])->name('packages.assign');
     Route::get('/api/cities-by-country', [AdminPackageController::class, 'getCitiesByCountry'])->name('api.cities-by-country');
     Route::get('/api/areas-by-city', [AdminPackageController::class, 'getAreasByCity'])->name('api.areas-by-city');
     Route::get('/api/properties-by-area', [AdminPackageController::class, 'getPropertiesByArea'])->name('api.properties-by-area');
 
-    // Users
-    Route::resource('users', UserController::class)->only(['index', 'show']);
+    // Users - Super Admin & Admin only
+    Route::middleware(['role:Super Admin,Admin'])->group(function () {
+        Route::resource('users', UserController::class)->only(['index', 'show']);
     Route::patch('/users/{user}/proof-documents', [UserController::class, 'updateProofDocuments'])->name('users.update-proof-documents');
     Route::patch('/users/{user}/bank-details', [UserController::class, 'updateBankDetails'])->name('users.update-bank-details');
     Route::patch('/users/{user}/agreement-details', [UserController::class, 'updateAgreementDetails'])->name('users.update-agreement-details');
@@ -87,16 +141,19 @@ Route::middleware(['auth'])->prefix('admin')->name('admin.')->group(function () 
     Route::post('/users/{user}/packages/{package}/documents', [UserController::class, 'updatePackageDocuments'])->name('users.update-package-documents');
     Route::delete('/users/{user}/packages/{package}/documents/{type}', [UserController::class, 'deletePackageDocument'])->name('users.delete-package-document');
 
-    // User CRUD operations
-    Route::post('/users', [UserController::class, 'store'])->name('users.store');
-    Route::delete('/users/{user}', [UserController::class, 'destroy'])->name('users.destroy');
+        // User CRUD operations
+        Route::post('/users', [UserController::class, 'store'])->name('users.store');
+        Route::delete('/users/{user}', [UserController::class, 'destroy'])->name('users.destroy');
+    });
 
-    // Manage Users (CRUD)
-    Route::resource('manage-users', ManageUserController::class);
+    // Manage Users (CRUD) - Super Admin & Admin only
+    Route::middleware(['role:Super Admin,Admin'])->group(function () {
+        Route::resource('manage-users', ManageUserController::class);
     Route::get('/manage-users/{user}/messages', [ManageUserController::class, 'getMessages'])->name('manage-users.messages');
     Route::post('/manage-users/{user}/send-message', [ManageUserController::class, 'sendMessage'])->name('manage-users.send-message');
-    Route::post('/manage-users/bulk-action', [ManageUserController::class, 'bulkAction'])->name('manage-users.bulk-action');
-    Route::get('/manage-users/export', [ManageUserController::class, 'exportUsers'])->name('manage-users.export');
+        Route::post('/manage-users/bulk-action', [ManageUserController::class, 'bulkAction'])->name('manage-users.bulk-action');
+        Route::get('/manage-users/export', [ManageUserController::class, 'exportUsers'])->name('manage-users.export');
+    });
 
     // Bookings
     Route::resource('bookings', BookingController::class);
@@ -115,22 +172,24 @@ Route::middleware(['auth'])->prefix('admin')->name('admin.')->group(function () 
     Route::post('/bookings/{booking}/cancel', [AdminBookingEditController::class, 'cancelBooking'])->name('admin-bookings.cancel');
     Route::get('/api/booking-calculation/{booking}', [AdminBookingEditController::class, 'getBookingCalculation'])->name('api.booking-calculation');
 
-    // Countries & Cities
-    Route::resource('countries', CountryController::class);
-    Route::resource('cities', CityController::class);    // Areas
-    Route::resource('areas', AreaController::class);
+    // Countries & Cities - Super Admin & Admin only
+    Route::middleware(['role:Super Admin,Admin'])->group(function () {
+        Route::resource('countries', CountryController::class);
+        Route::resource('cities', CityController::class);
+        Route::resource('areas', AreaController::class);
 
-    // Amenities
-    Route::resource('amenities', AmenityController::class);
-    Route::resource('amenity-types', AmenityTypeController::class);
+        // Amenities
+        Route::resource('amenities', AmenityController::class);
+        Route::resource('amenity-types', AmenityTypeController::class);
 
-    // Maintains
-    Route::resource('maintains', MaintainController::class);
-    Route::resource('maintain-types', MaintainTypeController::class);
+        // Maintains
+        Route::resource('maintains', MaintainController::class);
+        Route::resource('maintain-types', MaintainTypeController::class);
 
-    // Properties
-    Route::resource('properties', PropertyController::class);
-    Route::resource('property-types', PropertyTypeController::class);
+        // Properties
+        Route::resource('properties', PropertyController::class);
+        Route::resource('property-types', PropertyTypeController::class);
+    });
 
     // Payments
     Route::get('/payments', [PaymentController::class, 'index'])->name('payments.index');
@@ -159,8 +218,9 @@ Route::middleware(['auth'])->prefix('admin')->name('admin.')->group(function () 
     Route::patch('/profile/documents/{document}', [AdminProfileController::class, 'updateDocument'])->name('profile.update-document');
     Route::delete('/profile/documents/{document}', [AdminProfileController::class, 'destroyDocument'])->name('profile.destroy-document');
 
-    // Settings
-    Route::get('/settings', [SettingsController::class, 'index'])->name('settings.index');
+    // Settings - Super Admin only
+    Route::middleware(['role:Super Admin'])->group(function () {
+        Route::get('/settings', [SettingsController::class, 'index'])->name('settings.index');
     Route::get('/settings/header', [SettingsController::class, 'headerSettings'])->name('settings.header');
     Route::patch('/settings/header', [SettingsController::class, 'updateHeader'])->name('settings.update-header');
     Route::get('/settings/hero', [SettingsController::class, 'heroSettings'])->name('settings.hero');
@@ -176,8 +236,9 @@ Route::middleware(['auth'])->prefix('admin')->name('admin.')->group(function () 
     Route::get('/settings/partner-terms-conditions', [SettingsController::class, 'partnerTermsConditionsSettings'])->name('settings.partner-terms-conditions');
     Route::patch('/settings/partner-terms-conditions', [SettingsController::class, 'updatePartnerTermsConditions'])->name('settings.update-partner-terms-conditions');
     Route::post('/settings/social-links', [SettingsController::class, 'storeSocialLink'])->name('settings.store-social-link');
-    Route::patch('/settings/social-links/{socialLink}', [SettingsController::class, 'updateSocialLink'])->name('settings.update-social-link');
-    Route::delete('/settings/social-links/{socialLink}', [SettingsController::class, 'destroySocialLink'])->name('settings.destroy-social-link');
+        Route::patch('/settings/social-links/{socialLink}', [SettingsController::class, 'updateSocialLink'])->name('settings.update-social-link');
+        Route::delete('/settings/social-links/{socialLink}', [SettingsController::class, 'destroySocialLink'])->name('settings.destroy-social-link');
+    });
 });
 
 require __DIR__.'/auth.php';

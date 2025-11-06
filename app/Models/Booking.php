@@ -60,12 +60,40 @@ class Booking extends Model
         return $this->belongsTo(Package::class);
     }
 
+    /**
+     * Get the first room for this booking
+     * This is an accessor, not a relationship
+     */
+    public function getRoomAttribute()
+    {
+        $roomIds = is_string($this->room_ids) ? json_decode($this->room_ids, true) : $this->room_ids;
+        $firstRoomId = is_array($roomIds) && !empty($roomIds) ? $roomIds[0] : null;
+
+        if ($firstRoomId) {
+            return Room::find($firstRoomId);
+        }
+
+        return null;
+    }
+
+    /**
+     * Get all rooms for this booking
+     */
+    public function getRoomsAttribute()
+    {
+        $roomIds = is_string($this->room_ids) ? json_decode($this->room_ids, true) : $this->room_ids;
+
+        if (is_array($roomIds) && !empty($roomIds)) {
+            return Room::whereIn('id', $roomIds)->get();
+        }
+
+        return collect();
+    }
+
     public function payments()
     {
         return $this->hasMany(Payment::class);
-    }
-
-    public function paymentsPackage()
+    }    public function paymentsPackage()
     {
         return $this->hasMany(PackagePayment::class);
     }
