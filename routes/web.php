@@ -24,10 +24,12 @@ use App\Http\Controllers\Admin\ProfileController as AdminProfileController;
 use App\Http\Controllers\Admin\AdminBookingController;
 use App\Http\Controllers\Admin\AdminBookingEditController;
 use App\Http\Controllers\Admin\ManageUserController;
+use App\Http\Controllers\Guest\DashboardController as GuestDashboardController;
 use Illuminate\Foundation\Application;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Route;
 use Illuminate\Support\Facades\Artisan;
+use Illuminate\Support\Facades\Auth;
 use Inertia\Inertia;
 
 // Public Utility Routes
@@ -88,14 +90,86 @@ Route::get('/stripe/cancel/{booking}', [CheckoutController::class, 'stripeCancel
 // Booking Complete Route
 Route::get('/booking/complete/{booking}', [CheckoutController::class, 'bookingComplete'])->name('booking.complete');
 
+// Default Dashboard - Redirects based on user role
 Route::get('/dashboard', function () {
-    return Inertia::render('dashboard');
+    $user = Auth::user();
+
+    if (!$user) {
+        return redirect()->route('login');
+    }
+
+    // Check if user has Spatie roles
+    if (method_exists($user, 'hasRole')) {
+        // Super Admin, Admin, and Partner go to admin dashboard
+        if ($user->hasRole(['Super Admin', 'Admin', 'Partner'])) {
+            return redirect()->route('admin.dashboard');
+        }
+
+        // Guest or User role goes to guest dashboard
+        if ($user->hasRole(['Guest', 'User'])) {
+            return redirect()->route('guest.dashboard');
+        }
+    }
+
+    // Check role column if Spatie roles not working
+    if (isset($user->role)) {
+        if (in_array($user->role, ['Super Admin', 'Admin', 'Partner'])) {
+            return redirect()->route('admin.dashboard');
+        }
+
+        if (in_array($user->role, ['Guest', 'User'])) {
+            return redirect()->route('guest.dashboard');
+        }
+    }
+
+    // Default fallback to home
+    return redirect()->route('home');
 })->middleware(['auth', 'verified'])->name('dashboard');
 
-Route::middleware('auth')->group(function () {
-    Route::get('/profile', [ProfileController::class, 'edit'])->name('profile.edit');
-    Route::patch('/profile', [ProfileController::class, 'update'])->name('profile.update');
-    Route::delete('/profile', [ProfileController::class, 'destroy'])->name('profile.destroy');
+// Guest Routes - For regular users (guests and users)
+Route::middleware(['auth', 'role:Guest,User'])->prefix('guest')->name('guest.')->group(function () {
+    Route::get('/dashboard', [GuestDashboardController::class, 'index'])->name('dashboard');
+
+    // Booking Routes
+    Route::get('/bookings', [\App\Http\Controllers\Guest\BookingController::class, 'index'])->name('bookings.index');
+    Route::get('/bookings/{id}', [\App\Http\Controllers\Guest\BookingController::class, 'show'])->name('bookings.show');
+    Route::post('/bookings/{id}/payment', [\App\Http\Controllers\Guest\BookingController::class, 'processPayment'])->name('bookings.payment');
+    Route::post('/bookings/{id}/auto-renewal', [\App\Http\Controllers\Guest\BookingController::class, 'toggleAutoRenewal'])->name('bookings.auto-renewal');
+    Route::post('/bookings/{id}/cancel', [\App\Http\Controllers\Guest\BookingController::class, 'cancel'])->name('bookings.cancel');
+
+    // Document Routes
+    Route::get('/documents', [\App\Http\Controllers\Guest\DocumentController::class, 'index'])->name('documents.index');
+
+    // Payment Routes
+    Route::get('/payments', [\App\Http\Controllers\Guest\PaymentController::class, 'index'])->name('payments.index');
+
+    // Profile Routes
+    Route::get('/profile', [ProfileController::class, 'show'])->name('profile.show');
+    Route::post('/profile', [ProfileController::class, 'updateProfile'])->name('profile.update');
+    Route::post('/profile/password', [ProfileController::class, 'updatePassword'])->name('profile.update-password');
+    Route::post('/profile/user-detail', [ProfileController::class, 'updateUserDetail'])->name('profile.update-user-detail');
+    Route::post('/profile/agreement', [ProfileController::class, 'updateAgreementDetail'])->name('profile.update-agreement');
+    Route::delete('/profile/agreement', [ProfileController::class, 'deleteAgreementDetail'])->name('profile.delete-agreement');
+    Route::post('/profile/bank', [ProfileController::class, 'updateBankDetail'])->name('profile.update-bank');
+    Route::post('/profile/documents', [ProfileController::class, 'uploadDocument'])->name('profile.upload-document');
+    Route::post('/profile/documents/{id}', [ProfileController::class, 'updateDocument'])->name('profile.update-document');
+    Route::delete('/profile/documents/{id}', [ProfileController::class, 'deleteDocument'])->name('profile.delete-document');
+    Route::post('/profile/id-proof', [ProfileController::class, 'updateIdProof'])->name('profile.update-id-proof');
+
+    // Message Routes
+    Route::get('/messages', [\App\Http\Controllers\Guest\MessageController::class, 'index'])->name('messages.index');
+    Route::get('/messages/{id}', [\App\Http\Controllers\Guest\MessageController::class, 'show'])->name('messages.show');
+    Route::post('/messages/{id}/mark-as-read', [\App\Http\Controllers\Guest\MessageController::class, 'markAsRead'])->name('messages.mark-read');
+    Route::post('/messages/mark-all-read', [\App\Http\Controllers\Guest\MessageController::class, 'markAllAsRead'])->name('messages.mark-all-read');
+    Route::delete('/messages/{id}', [\App\Http\Controllers\Guest\MessageController::class, 'destroy'])->name('messages.destroy');
+
+    // Payment Success/Cancel Routes
+    Route::get('/payment/success', function() {
+        return redirect()->route('guest.bookings.index')->with('success', 'Payment completed successfully!');
+    })->name('payment.success');
+    Route::get('/payment/cancel', function() {
+        return redirect()->route('guest.bookings.index')->with('error', 'Payment was cancelled.');
+    })->name('payment.cancel');
 });
 
 // Admin Routes
@@ -106,6 +180,7 @@ Route::middleware(['auth', 'role:Super Admin,Admin,Partner'])->prefix('admin')->
     // Packages - Super Admin & Admin can CRUD, Partner can only view their own
     Route::resource('packages', AdminPackageController::class);
     Route::post('/packages/{package}/assign', [AdminPackageController::class, 'assign'])->name('packages.assign');
+    Route::put('/packages/{package}/documents', [AdminPackageController::class, 'updateDocuments'])->name('packages.update-documents');
     Route::get('/api/cities-by-country', [AdminPackageController::class, 'getCitiesByCountry'])->name('api.cities-by-country');
     Route::get('/api/areas-by-city', [AdminPackageController::class, 'getAreasByCity'])->name('api.areas-by-city');
     Route::get('/api/properties-by-area', [AdminPackageController::class, 'getPropertiesByArea'])->name('api.properties-by-area');
@@ -148,11 +223,9 @@ Route::middleware(['auth', 'role:Super Admin,Admin,Partner'])->prefix('admin')->
 
     // Manage Users (CRUD) - Super Admin & Admin only
     Route::middleware(['role:Super Admin,Admin'])->group(function () {
-        Route::resource('manage-users', ManageUserController::class);
-    Route::get('/manage-users/{user}/messages', [ManageUserController::class, 'getMessages'])->name('manage-users.messages');
-    Route::post('/manage-users/{user}/send-message', [ManageUserController::class, 'sendMessage'])->name('manage-users.send-message');
-        Route::post('/manage-users/bulk-action', [ManageUserController::class, 'bulkAction'])->name('manage-users.bulk-action');
-        Route::get('/manage-users/export', [ManageUserController::class, 'exportUsers'])->name('manage-users.export');
+        Route::get('/manage-users', [ManageUserController::class, 'index'])->name('manage-users.index');
+        Route::put('/manage-users/{user}', [ManageUserController::class, 'update'])->name('manage-users.update');
+        Route::delete('/manage-users/{user}', [ManageUserController::class, 'destroy'])->name('manage-users.destroy');
     });
 
     // Bookings
@@ -206,17 +279,18 @@ Route::middleware(['auth', 'role:Super Admin,Admin,Partner'])->prefix('admin')->
     Route::post('/mail/send', [MailController::class, 'send'])->name('mail.send');
     Route::post('/mail/bulk-notification', [MailController::class, 'sendBulkNotification'])->name('mail.bulk-notification');
 
-    // Admin Profile
-    Route::get('/profile', [AdminProfileController::class, 'show'])->name('profile.show');
-    Route::patch('/profile', [AdminProfileController::class, 'updateProfile'])->name('profile.update');
-    Route::patch('/profile/password', [AdminProfileController::class, 'updatePassword'])->name('profile.update-password');
-    Route::patch('/profile/proof-documents', [AdminProfileController::class, 'updateProofDocuments'])->name('profile.update-proof-documents');
-    Route::patch('/profile/bank-details', [AdminProfileController::class, 'updateBankDetails'])->name('profile.update-bank-details');
-    Route::patch('/profile/agreement-details', [AdminProfileController::class, 'updateAgreementDetails'])->name('profile.update-agreement-details');
-    Route::patch('/profile/user-details', [AdminProfileController::class, 'updateUserDetails'])->name('profile.update-user-details');
-    Route::post('/profile/documents', [AdminProfileController::class, 'storeDocument'])->name('profile.store-document');
-    Route::patch('/profile/documents/{document}', [AdminProfileController::class, 'updateDocument'])->name('profile.update-document');
-    Route::delete('/profile/documents/{document}', [AdminProfileController::class, 'destroyDocument'])->name('profile.destroy-document');
+    // Admin Profile - Using unified ProfileController
+    Route::get('/profile', [ProfileController::class, 'show'])->name('profile.show');
+    Route::post('/profile', [ProfileController::class, 'updateProfile'])->name('profile.update');
+    Route::post('/profile/password', [ProfileController::class, 'updatePassword'])->name('profile.update-password');
+    Route::post('/profile/user-detail', [ProfileController::class, 'updateUserDetail'])->name('profile.update-user-detail');
+    Route::post('/profile/agreement', [ProfileController::class, 'updateAgreementDetail'])->name('profile.update-agreement');
+    Route::delete('/profile/agreement', [ProfileController::class, 'deleteAgreementDetail'])->name('profile.delete-agreement');
+    Route::post('/profile/bank', [ProfileController::class, 'updateBankDetail'])->name('profile.update-bank');
+    Route::post('/profile/documents', [ProfileController::class, 'uploadDocument'])->name('profile.upload-document');
+    Route::post('/profile/documents/{id}', [ProfileController::class, 'updateDocument'])->name('profile.update-document');
+    Route::delete('/profile/documents/{id}', [ProfileController::class, 'deleteDocument'])->name('profile.delete-document');
+    Route::post('/profile/id-proof', [ProfileController::class, 'updateIdProof'])->name('profile.update-id-proof');
 
     // Settings - Super Admin only
     Route::middleware(['role:Super Admin'])->group(function () {

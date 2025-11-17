@@ -13,6 +13,7 @@ use App\Models\Property;
 use App\Models\User;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Auth;
+use Illuminate\Support\Facades\Storage;
 use Inertia\Inertia;
 
 class PackageController extends Controller
@@ -218,5 +219,42 @@ class PackageController extends Controller
     {
         $properties = Property::where('area_id', $request->area_id)->get();
         return response()->json($properties);
+    }
+
+    public function updateDocuments(Request $request, Package $package)
+    {
+        $validated = $request->validate([
+            'document_types' => 'required|array',
+            'documents' => 'required|array',
+            'documents.*' => 'nullable|file|mimes:pdf,jpeg,png,jpg|max:2048',
+        ]);
+
+        foreach ($validated['document_types'] as $index => $type) {
+            if ($request->hasFile("documents.{$type}")) {
+                $file = $request->file("documents.{$type}");
+                $path = $file->store('package_documents', 'public');
+
+                // Check if document already exists
+                $document = $package->documents()->where('type', $type)->first();
+
+                if ($document) {
+                    // Delete old file
+                    if ($document->path && Storage::disk('public')->exists($document->path)) {
+                        Storage::disk('public')->delete($document->path);
+                    }
+                    // Update with new file
+                    $document->update(['path' => $path, 'updated_at' => now()]);
+                } else {
+                    // Create new document
+                    $package->documents()->create([
+                        'type' => $type,
+                        'path' => $path,
+                        'expires_at' => now()->addYear(), // Default 1 year expiry
+                    ]);
+                }
+            }
+        }
+
+        return redirect()->back()->with('success', 'Package documents updated successfully.');
     }
 }

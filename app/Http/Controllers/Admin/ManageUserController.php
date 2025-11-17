@@ -4,111 +4,79 @@ namespace App\Http\Controllers\Admin;
 
 use App\Http\Controllers\Controller;
 use App\Models\User;
-use App\Models\Message;
 use Illuminate\Http\Request;
-use Illuminate\Support\Facades\Auth;
 use Illuminate\Support\Facades\Hash;
+use Illuminate\Validation\Rule;
 use Inertia\Inertia;
+use Spatie\Permission\Models\Role;
 
 class ManageUserController extends Controller
 {
     public function index(Request $request)
     {
-        $searchTerm = $request->get('search');
-        $stayStatus = $request->get('stay_status');
+        $search = $request->get('search');
+        $roleFilter = $request->get('role');
+        $status = $request->get('status');
 
-        $users = User::with(['userDetail', 'bookings.package'])
-            ->when($searchTerm, function ($query) use ($searchTerm) {
-                $query->where('name', 'like', "%{$searchTerm}%")
-                      ->orWhere('email', 'like', "%{$searchTerm}%");
-            })
-            ->when($stayStatus, function ($query) use ($stayStatus) {
-                $query->whereHas('userDetail', function ($q) use ($stayStatus) {
-                    $q->where('stay_status', $stayStatus);
+        $users = User::with('roles')
+            ->when($search, function ($query) use ($search) {
+                $query->where(function($q) use ($search) {
+                    $q->where('name', 'like', "%{$search}%")
+                      ->orWhere('email', 'like', "%{$search}%");
                 });
             })
-            ->paginate(15);
+            ->when($roleFilter, function ($query) use ($roleFilter) {
+                $query->whereHas('roles', function($q) use ($roleFilter) {
+                    $q->where('name', $roleFilter);
+                });
+            })
+            ->when($status, function ($query) use ($status) {
+                $query->where('status', $status);
+            })
+            ->orderBy('created_at', 'desc')
+            ->paginate(15)
+            ->withQueryString();
 
-        $stayStatusOptions = ['Staying', 'Want to Stay'];
+        // Transform users to include role name
+        $users->getCollection()->transform(function ($user) {
+            $user->role_name = $user->roles->first()?->name ?? 'No Role';
+            return $user;
+        });
 
-        return Inertia::render('Admin/ManageUser/Index', [
+        // Get roles from Spatie Role model
+        $availableRoles = Role::pluck('name')->toArray();
+        $statuses = ['active', 'inactive'];
+
+        return Inertia::render('Admin/ManageUsers/Index', [
             'users' => $users,
-            'stayStatusOptions' => $stayStatusOptions,
+            'roles' => $availableRoles,
+            'statuses' => $statuses,
             'filters' => [
-                'search' => $searchTerm,
-                'stay_status' => $stayStatus,
+                'search' => $search,
+                'role' => $roleFilter,
+                'status' => $status,
             ],
-        ]);
-    }
-
-    public function create()
-    {
-        // For now, we'll use simple role strings instead of Spatie roles
-        $roles = ['User', 'Partner', 'Super Admin'];
-
-        return Inertia::render('Admin/ManageUser/Create', [
-            'roles' => $roles,
-        ]);
-    }
-
-    public function store(Request $request)
-    {
-        $validated = $request->validate([
-            'name' => 'required|string|max:255',
-            'email' => 'required|string|email|max:255|unique:users',
-            'password' => 'required|string|min:8|confirmed',
-            'role' => 'required|string|in:User,Partner,Super Admin',
-        ]);
-
-        $user = User::create([
-            'name' => $validated['name'],
-            'email' => $validated['email'],
-            'password' => Hash::make($validated['password']),
-            'role' => $validated['role'], // Store role directly in user table for now
-        ]);
-
-        return redirect()->route('admin.manage-users.index')
-            ->with('success', 'User created successfully.');
-    }
-
-    public function show(User $user)
-    {
-        $user->load([
-            'userDetail',
-            'bankDetail',
-            'agreementDetail',
-            'documents',
-            'bookings.package'
-        ]);
-
-        return Inertia::render('Admin/ManageUser/Show', [
-            'user' => $user,
-        ]);
-    }
-
-    public function edit(User $user)
-    {
-        $roles = ['User', 'Partner', 'Super Admin'];
-
-        return Inertia::render('Admin/ManageUser/Edit', [
-            'user' => $user,
-            'roles' => $roles,
         ]);
     }
 
     public function update(Request $request, User $user)
     {
+        // Get available role names from Spatie
+        $availableRoles = Role::pluck('name')->toArray();
+
         $validated = $request->validate([
-            'name' => 'required|string|max:255',
-            'email' => 'required|string|email|max:255|unique:users,email,' . $user->id,
-            'password' => 'nullable|string|min:8|confirmed',
-            'role' => 'required|string|in:User,Partner,Super Admin',
+            'name' => ['required', 'string', 'max:255'],
+            'email' => ['required', 'email', 'max:255', Rule::unique('users')->ignore($user->id)],
+            'role' => ['required', 'string', Rule::in($availableRoles)],
+            'status' => ['required', 'string', 'in:active,inactive'],
+            'password' => ['nullable', 'string', 'min:8'],
         ]);
 
+        // Update basic user info
         $updateData = [
             'name' => $validated['name'],
             'email' => $validated['email'],
-            'role' => $validated['role'],
+            'status' => $validated['status'],
         ];
 
         if (!empty($validated['password'])) {
@@ -117,150 +85,20 @@ class ManageUserController extends Controller
 
         $user->update($updateData);
 
-        return redirect()->route('admin.manage-users.index')
-            ->with('success', 'User updated successfully.');
+        // Sync Spatie role
+        $user->syncRoles([$validated['role']]);
+
+        return back()->with('success', 'User updated successfully.');
     }
 
     public function destroy(User $user)
     {
-        $currentUser = Auth::user();
-
-        // Authorization check - only Super Admin can delete users
-        if (!$currentUser || $currentUser->role !== 'Super Admin') {
-            return redirect()->back()
-                ->with('error', "You don't have permission to delete users.");
+        // Prevent self-deletion
+        if ($user->id === auth()->id()) {
+            return back()->with('error', 'You cannot delete your own account.');
         }
-
-        // Prevent deleting own account
-        if ($currentUser->id === $user->id) {
-            return redirect()->back()
-                ->with('error', "You cannot delete your own account.");
-        }
-
-        // Check if user has active bookings
-        if ($user->bookings()->whereIn('status', ['confirmed', 'pending'])->count() > 0) {
-            return redirect()->back()
-                ->with('error', "Cannot delete user with active bookings.");
-        }
-
         $user->delete();
-
-        return redirect()->route('admin.manage-users.index')
-            ->with('success', 'User deleted successfully.');
+        return back()->with('success', 'User deleted successfully.');
     }
 
-    public function getMessages(User $user)
-    {
-        $messages = Message::where('recipient_id', $user->id)
-            ->orderBy('created_at', 'desc')
-            ->paginate(10);
-
-        return Inertia::render('Admin/ManageUser/Messages', [
-            'user' => $user,
-            'messages' => $messages,
-        ]);
-    }
-
-    public function sendMessage(Request $request, User $user)
-    {
-        $validated = $request->validate([
-            'subject' => 'required|string|max:255',
-            'message' => 'required|string',
-        ]);
-
-        Message::create([
-            'sender_id' => Auth::id(),
-            'recipient_id' => $user->id,
-            'subject' => $validated['subject'],
-            'message' => $validated['message'],
-            'is_read' => false,
-        ]);
-
-        return redirect()->back()
-            ->with('success', 'Message sent successfully.');
-    }
-
-    public function bulkAction(Request $request)
-    {
-        $validated = $request->validate([
-            'action' => 'required|string|in:delete,activate,deactivate',
-            'user_ids' => 'required|array',
-            'user_ids.*' => 'exists:users,id',
-        ]);
-
-        $currentUser = Auth::user();
-
-        // Authorization check
-        if (!$currentUser || $currentUser->role !== 'Super Admin') {
-            return redirect()->back()
-                ->with('error', "You don't have permission to perform bulk actions.");
-        }
-
-        $userIds = $validated['user_ids'];
-        
-        // Remove current user from bulk delete action
-        if ($validated['action'] === 'delete') {
-            $userIds = array_filter($userIds, function($id) use ($currentUser) {
-                return $id !== $currentUser->id;
-            });
-        }
-
-        switch ($validated['action']) {
-            case 'delete':
-                $users = User::whereIn('id', $userIds)
-                    ->whereDoesntHave('bookings', function($query) {
-                        $query->whereIn('status', ['confirmed', 'pending']);
-                    })
-                    ->get();
-
-                foreach ($users as $user) {
-                    $user->delete();
-                }
-
-                return redirect()->back()
-                    ->with('success', count($users) . ' users deleted successfully.');
-
-            case 'activate':
-                User::whereIn('id', $userIds)->update(['status' => 'active']);
-                
-                return redirect()->back()
-                    ->with('success', 'Users activated successfully.');
-
-            case 'deactivate':
-                User::whereIn('id', $userIds)->update(['status' => 'inactive']);
-                
-                return redirect()->back()
-                    ->with('success', 'Users deactivated successfully.');
-
-            default:
-                return redirect()->back()
-                    ->with('error', 'Invalid action.');
-        }
-    }
-
-    public function exportUsers(Request $request)
-    {
-        $searchTerm = $request->get('search');
-        $stayStatus = $request->get('stay_status');
-
-        $users = User::with(['userDetail', 'bookings.package'])
-            ->when($searchTerm, function ($query) use ($searchTerm) {
-                $query->where('name', 'like', "%{$searchTerm}%")
-                      ->orWhere('email', 'like', "%{$searchTerm}%");
-            })
-            ->when($stayStatus, function ($query) use ($stayStatus) {
-                $query->whereHas('userDetail', function ($q) use ($stayStatus) {
-                    $q->where('stay_status', $stayStatus);
-                });
-            })
-            ->get();
-
-        // This would typically generate CSV/Excel export
-        // For now, just return JSON data
-        return response()->json([
-            'users' => $users,
-            'exported_at' => now(),
-            'total_count' => $users->count(),
-        ]);
-    }
 }

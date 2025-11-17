@@ -32,6 +32,7 @@ interface AuthUser {
     name: string;
     email: string;
     role?: string;
+    role_name?: string; // Spatie role name
     status?: string;
 }
 
@@ -54,6 +55,11 @@ export default function AdminLayout({ children }: PropsWithChildren) {
     const [sidebarOpen, setSidebarOpen] = useState(false);
     const [openDropdowns, setOpenDropdowns] = useState<string[]>([]);
 
+    // Check if user is Partner (use Spatie role)
+    const userRole = auth.user?.role_name || auth.user?.role;
+    const isPartner = userRole === 'Partner';
+    const isSuperAdmin = userRole === 'Super Admin';
+
     const toggleDropdown = (name: string) => {
         setOpenDropdowns(prev =>
             prev.includes(name)
@@ -64,14 +70,15 @@ export default function AdminLayout({ children }: PropsWithChildren) {
 
     const navigation: NavItem[] = [
         { name: 'Dashboard', href: '/admin/dashboard', icon: Home },
-        {
+        // User Management - Only Super Admin & Admin
+        ...(!isPartner ? [{
             name: 'User Management',
             icon: Users,
             children: [
                 { name: 'All Users', href: '/admin/users', icon: Users },
                 { name: 'Manage Users', href: '/admin/manage-users', icon: User },
             ],
-        },
+        }] : []),
         {
             name: 'Packages',
             icon: Package,
@@ -88,7 +95,8 @@ export default function AdminLayout({ children }: PropsWithChildren) {
                 { name: 'Create Booking', href: '/admin/admin-bookings/create', icon: Calendar },
             ],
         },
-        {
+        // Locations - Only Super Admin & Admin
+        ...(!isPartner ? [{
             name: 'Locations',
             icon: MapPin,
             children: [
@@ -96,31 +104,34 @@ export default function AdminLayout({ children }: PropsWithChildren) {
                 { name: 'Cities', href: '/admin/cities', icon: MapPin },
                 { name: 'Areas', href: '/admin/areas', icon: MapPin },
             ],
-        },
-        {
+        }] : []),
+        // Properties - Only Super Admin & Admin
+        ...(!isPartner ? [{
             name: 'Properties',
             icon: Building,
             children: [
                 { name: 'Properties', href: '/admin/properties', icon: Building },
                 { name: 'Property Types', href: '/admin/property-types', icon: Building },
             ],
-        },
-        {
+        }] : []),
+        // Amenities - Only Super Admin & Admin
+        ...(!isPartner ? [{
             name: 'Amenities',
             icon: Sparkles,
             children: [
                 { name: 'Amenities', href: '/admin/amenities', icon: Sparkles },
                 { name: 'Amenity Types', href: '/admin/amenity-types', icon: Sparkles },
             ],
-        },
-        {
+        }] : []),
+        // Maintenance - Only Super Admin & Admin
+        ...(!isPartner ? [{
             name: 'Maintenance',
             icon: Wrench,
             children: [
                 { name: 'Maintains', href: '/admin/maintains', icon: Wrench },
                 { name: 'Maintain Types', href: '/admin/maintain-types', icon: Wrench },
             ],
-        },
+        }] : []),
         {
             name: 'Payments',
             icon: CreditCard,
@@ -129,9 +140,13 @@ export default function AdminLayout({ children }: PropsWithChildren) {
                 { name: 'Payment Links', href: '/admin/payment-links', icon: FileText },
             ],
         },
-        { name: 'Mail', href: '/admin/mail', icon: Mail },
-        { name: 'Settings', href: '/admin/settings', icon: Settings },
+        // Mail - Only Super Admin & Admin
+        ...(!isPartner ? [{ name: 'Mail', href: '/admin/mail', icon: Mail }] : []),
+        { name: 'Profile', href: '/admin/profile', icon: User },
+        // Settings - Only Super Admin
+        // { name: 'Settings', href: '/admin/settings', icon: Settings },
     ];
+
 
     const NavLink = ({ item, depth = 0 }: { item: NavItem; depth?: number }) => {
         const isActive = window.location.pathname === item.href;
@@ -244,7 +259,7 @@ export default function AdminLayout({ children }: PropsWithChildren) {
                                 {auth.user?.name}
                             </p>
                             <p className="text-xs text-indigo-600 font-medium truncate">
-                                {auth.user?.role || 'Admin'}
+                                {userRole || 'Admin'}
                             </p>
                         </div>
                     </div>

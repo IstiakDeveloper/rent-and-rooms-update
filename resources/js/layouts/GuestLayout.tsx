@@ -109,7 +109,45 @@ function GuestLayout({
     const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
     const [countryDropdownOpen, setCountryDropdownOpen] = useState(false);
     const [userDropdownOpen, setUserDropdownOpen] = useState(false);
-    const { openLogin, openRegister } = useAuthModal();    const handleCountryChange = async (countryId: number) => {
+    const { openLogin, openRegister } = useAuthModal();
+
+    // Get dashboard URL based on user role
+    const getDashboardUrl = (user: User | null | undefined): string => {
+        if (!user || !user.role) return '/dashboard';
+
+        const role = user.role;
+
+        // Super Admin, Admin, and Partner go to admin dashboard
+        if (['Super Admin', 'Admin', 'Partner'].includes(role)) {
+            return '/admin/dashboard';
+        }
+
+        // Guest role goes to guest dashboard
+        if (role === 'Guest') {
+            return '/guest/dashboard';
+        }
+
+        // User role goes to guest dashboard (User = Guest)
+        if (role === 'User') {
+            return '/guest/dashboard';
+        }
+
+        // Default fallback
+        return '/dashboard';
+    };
+
+    // Display role - show "Guest" for User role
+    const getDisplayRole = (user: User | null | undefined): string => {
+        if (!user || !user.role) return 'Guest';
+
+        const role = user.role;
+
+        // If role is "User", display as "Guest"
+        if (role === 'User') return 'Guest';
+
+        // Otherwise return the actual role
+        return role;
+    };    const handleCountryChange = async (countryId: number) => {
         try {
             await axios.post('/set-country', { country_id: countryId });
             router.reload();
@@ -285,13 +323,13 @@ function GuestLayout({
                                                     <div>
                                                         <p className="font-semibold text-gray-900">{auth.user.name}</p>
                                                         <p className="text-sm text-gray-500">{auth.user.email}</p>
-                                                        <p className="text-xs text-blue-600 font-medium mt-1">{auth.user.role || 'User'}</p>
+                                                        <p className="text-xs text-blue-600 font-medium mt-1">{getDisplayRole(auth.user)}</p>
                                                     </div>
                                                 </div>
                                             </div>
                                             <div className="py-2">
                                                 <Link
-                                                    href="/dashboard"
+                                                    href={getDashboardUrl(auth.user)}
                                                     onClick={() => setUserDropdownOpen(false)}
                                                     className="flex items-center space-x-3 px-4 py-3 text-sm text-gray-700 hover:bg-blue-50 hover:text-blue-700 transition-all duration-200 group"
                                                 >
@@ -410,13 +448,13 @@ function GuestLayout({
                                         <div className="flex-1">
                                             <p className="text-base font-semibold text-gray-900">{auth.user.name}</p>
                                             <p className="text-sm text-gray-600">{auth.user.email}</p>
-                                            <p className="text-xs text-blue-600 font-medium mt-1">{auth.user.role || 'User'}</p>
+                                            <p className="text-xs text-blue-600 font-medium mt-1">{getDisplayRole(auth.user)}</p>
                                         </div>
                                     </div>
 
                                     <div className="space-y-2">
                                         <Link
-                                            href="/dashboard"
+                                            href={getDashboardUrl(auth.user)}
                                             className="flex items-center space-x-3 px-4 py-3 rounded-xl text-base font-medium text-gray-700 hover:bg-blue-50 hover:text-blue-600 transition-all duration-200"
                                             onClick={() => setMobileMenuOpen(false)}
                                         >

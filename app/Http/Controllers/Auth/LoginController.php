@@ -59,17 +59,13 @@ class LoginController extends Controller
                     'name' => $user->name,
                     'email' => $user->email,
                     'roles' => method_exists($user, 'getRoleNames') ? $user->getRoleNames() : []
-                ]
+                ],
+                'redirect' => $this->getRedirectRoute($user)
             ]);
         }
 
         // Redirect based on user role for regular form submissions
-        $user = Auth::user();
-        if (method_exists($user, 'hasRole') && $user->hasRole('Admin')) {
-            return redirect()->intended(route('admin.dashboard'));
-        }
-
-        return redirect()->intended(route('home'));
+        return redirect()->intended($this->getRedirectRoute(Auth::user()));
     }
 
     /**
@@ -113,5 +109,36 @@ class LoginController extends Controller
     protected function throttleKey(Request $request): string
     {
         return Str::transliterate(Str::lower($request->input('email')).'|'.$request->ip());
+    }
+
+    /**
+     * Get the redirect route based on user role.
+     */
+    protected function getRedirectRoute($user): string
+    {
+        // Check if user has Spatie roles
+        if (method_exists($user, 'hasRole')) {
+            // Super Admin, Admin, and Partner go to admin dashboard
+            if ($user->hasRole(['Super Admin', 'Admin', 'Partner'])) {
+                return route('admin.dashboard');
+            }
+
+            // Guest or User role goes to guest dashboard
+            if ($user->hasRole(['Guest', 'User'])) {
+                return route('guest.dashboard');
+            }
+        }
+
+        // Check role column if Spatie roles not working
+        if (isset($user->role)) {
+            if (in_array($user->role, ['Super Admin', 'Admin', 'Partner'])) {
+                return route('admin.dashboard');
+            }
+
+            if (in_array($user->role, ['Guest', 'User'])) {
+                return route('guest.dashboard');
+            }
+        }        // Default fallback to home
+        return route('home');
     }
 }
