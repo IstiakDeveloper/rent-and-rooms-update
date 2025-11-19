@@ -24,6 +24,11 @@ class Package extends Model
         'details',
         'video_link',
         'common_bathrooms',
+        'assigned_to',
+        'assigned_by',
+        'assigned_at',
+        'expiration_date',
+        'status',
     ];
 
     /**
@@ -31,17 +36,28 @@ class Package extends Model
      *
      * @var array<int, string>
      */
-    protected $guarded = [
-        'status',
-        'expiration_date',
-        'assigned_to',
-        'assigned_by',
-        'assigned_at',
-    ];
-    protected $dates = ['assigned_at'];
+    protected $guarded = [];
+
+    protected $dates = ['assigned_at', 'expiration_date'];
+
     protected $casts = [
         'assigned_at' => 'datetime',
+        'expiration_date' => 'date',
     ];
+
+    /**
+     * The accessors to append to the model's array form.
+     *
+     * @var array
+     */
+    protected $appends = ['slug'];
+
+    /**
+     * The relationships that should always be loaded.
+     *
+     * @var array
+     */
+    protected $with = [];
 
 
     public function country()
