@@ -17,7 +17,7 @@ class PaymentController extends Controller
     public function index()
     {
         $payments = Payment::with([
-            'user',
+            'booking.user',
             'booking.package',
             'bookingPayment'
         ])->latest()->paginate(15);
@@ -30,7 +30,7 @@ class PaymentController extends Controller
     public function show(Payment $payment)
     {
         $payment->load([
-            'user',
+            'booking.user',
             'booking.package',
             'bookingPayment'
         ]);
@@ -92,48 +92,79 @@ class PaymentController extends Controller
 
     public function processPayment(Request $request, $uniqueId)
     {
-        $paymentLink = PaymentLink::where('unique_id', $uniqueId)->firstOrFail();
+        $paymentLink = PaymentLink::with(['bookingPayment', 'booking'])->where('unique_id', $uniqueId)->firstOrFail();
+
+        // Check if payment link is still active
+        if (!in_array($paymentLink->status, ['pending', 'active'])) {
+            return redirect()->back()
+                ->withInput()
+                ->with('error', 'This payment link is no longer active.');
+        }
 
         $validated = $request->validate([
             'payment_method' => 'required|string|in:BankTransfer,Stripe',
-            'bank_reference' => 'required_if:payment_method,BankTransfer|string',
+            'bank_reference' => 'required_if:payment_method,BankTransfer|nullable|string',
         ]);
+
+        // Map frontend payment method to database enum value
+        $paymentMethodMap = [
+            'BankTransfer' => 'bank_transfer',
+            'Stripe' => 'card',
+        ];
+        $dbPaymentMethod = $paymentMethodMap[$validated['payment_method']] ?? 'bank_transfer';
 
         // Determine payment type
         $bookingPayment = $paymentLink->bookingPayment;
-        $paymentType = $bookingPayment->milestone_type === 'Booking Fee' ? 'booking' : 'rent';
+        $paymentType = 'rent'; // default
+        if ($bookingPayment && $bookingPayment->milestone_type) {
+            $paymentType = $bookingPayment->milestone_type === 'Booking Fee' || $bookingPayment->milestone_type === 'Booking' ? 'booking' : 'rent';
+        }
 
         try {
+            \DB::beginTransaction();
+
             // Create payment record
             $paymentData = [
                 'booking_id' => $paymentLink->booking_id,
                 'booking_payment_id' => $paymentLink->booking_payment_id,
-                'user_id' => $paymentLink->user_id,
                 'amount' => $paymentLink->amount,
-                'payment_method' => $validated['payment_method'],
+                'payment_method' => $dbPaymentMethod,
                 'status' => 'completed',
                 'payment_type' => $paymentType,
-                'reference_number' => $validated['bank_reference'] ?? null,
+                'transaction_id' => $validated['bank_reference'] ?? ('PL-' . uniqid()),
             ];
 
             $payment = Payment::create($paymentData);
 
-            // Update booking payment status
-            $bookingPayment->update([
-                'status' => 'completed',
-                'paid_at' => now(),
-            ]);
+            // Update booking payment status if exists
+            if ($bookingPayment) {
+                $bookingPayment->update([
+                    'payment_status' => 'paid',
+                    'paid_at' => now(),
+                    'payment_method' => $dbPaymentMethod,
+                    'transaction_reference' => $validated['bank_reference'] ?? null,
+                ]);
+            }
 
             // Update payment link status
             $paymentLink->update([
                 'status' => 'completed',
-                'paid_at' => now(),
+                'transaction_id' => $validated['bank_reference'] ?? $payment->id,
             ]);
+
+            \DB::commit();
 
             return redirect()->route('admin.payment-links.show', $uniqueId)
                 ->with('success', 'Payment processed successfully.');
 
         } catch (\Exception $e) {
+            \DB::rollBack();
+            \Log::error('Payment processing failed', [
+                'unique_id' => $uniqueId,
+                'error' => $e->getMessage(),
+                'trace' => $e->getTraceAsString()
+            ]);
+
             return redirect()->back()
                 ->withInput()
                 ->with('error', 'Payment processing failed: ' . $e->getMessage());
