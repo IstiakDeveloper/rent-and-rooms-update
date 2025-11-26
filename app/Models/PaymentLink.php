@@ -13,7 +13,9 @@ class PaymentLink extends Model
         'booking_payment_id',
         'amount',
         'status',
-        'transaction_id'
+        'transaction_id',
+        'expires_at',
+        'paid_at',
     ];
 
     public function booking()

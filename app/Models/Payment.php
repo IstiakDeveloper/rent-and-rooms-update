@@ -15,7 +15,11 @@ class Payment extends Model
         'transaction_id',
         'booking_payment_id',
         'payment_type',
-        'status'
+        'status',
+        'reference_number',
+        'admin_notes',
+        'updated_by',
+        'paid_at',
     ];
 
     /**
@@ -32,8 +36,21 @@ class Payment extends Model
     {
         return $this->belongsTo(Booking::class);
     }
+
     public function bookingPayment()
     {
         return $this->belongsTo(BookingPayment::class);
+    }
+
+    public function user()
+    {
+        return $this->hasOneThrough(
+            User::class,
+            Booking::class,
+            'id', // Foreign key on bookings table
+            'id', // Foreign key on users table
+            'booking_id', // Local key on payments table
+            'user_id' // Local key on bookings table
+        );
     }
 }
