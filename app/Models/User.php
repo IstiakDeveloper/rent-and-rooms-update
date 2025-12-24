@@ -2,14 +2,15 @@
 
 namespace App\Models;
 
-// use Illuminate\Contracts\Auth\MustVerifyEmail;
+use App\Notifications\CustomVerifyEmail;
+use Illuminate\Contracts\Auth\MustVerifyEmail;
 use Illuminate\Database\Eloquent\Factories\HasFactory;
 use Illuminate\Foundation\Auth\User as Authenticatable;
 use Illuminate\Notifications\Notifiable;
 use Spatie\Permission\Models\Role;
 use Spatie\Permission\Traits\HasRoles;
 
-class User extends Authenticatable
+class User extends Authenticatable implements MustVerifyEmail
 {
     use HasFactory, Notifiable;
     use HasRoles;
@@ -25,6 +26,7 @@ class User extends Authenticatable
         'phone',
         'password',
         'address',
+        'status',
         'proof_type_1',
         'proof_path_1',
         'proof_type_2',
@@ -56,6 +58,13 @@ class User extends Authenticatable
         'password',
         'remember_token',
     ];
+
+    /**
+     * The accessors to append to the model's array form.
+     *
+     * @var array
+     */
+    protected $appends = [];
 
     /**
      * Get the attributes that should be cast.
@@ -110,6 +119,18 @@ class User extends Authenticatable
         return $this->hasMany(Package::class);
     }
 
+    // Packages assigned to user as partner
+    public function assignedPackages()
+    {
+        return $this->hasMany(Package::class, 'assigned_to');
+    }
+
+    // Packages assigned to user as admin
+    public function adminPackages()
+    {
+        return $this->hasMany(Package::class, 'admin_id');
+    }
+
     public function isSuperAdmin()
     {
         return $this->role === 'Super Admin';
@@ -122,6 +143,19 @@ class User extends Authenticatable
     {
         return $this->hasMany(UserDocument::class);
     }
+
+    // Partner personal documents (fixed fields)
+    public function partnerDocuments()
+    {
+        return $this->hasOne(PartnerDocument::class);
+    }
+
+    // Dynamic package-specific documents (unlimited)
+    public function partnerDocumentItems()
+    {
+        return $this->hasMany(PartnerDocumentItem::class);
+    }
+
     public function agreementDetail()
     {
         return $this->hasOne(AgreementDetail::class);
@@ -143,6 +177,31 @@ class User extends Authenticatable
     public function packagePayments()
     {
         return $this->hasMany(PackagePayment::class);
+    }
+
+    /**
+     * Send the email verification notification.
+     *
+     * @return void
+     */
+    public function sendEmailVerificationNotification()
+    {
+        $this->notify(new CustomVerifyEmail);
+    }
+
+    /**
+     * Boot method to add model event listeners
+     */
+    protected static function boot()
+    {
+        parent::boot();
+
+        // Prevent deletion if user has bookings
+        static::deleting(function ($user) {
+            if ($user->bookings()->count() > 0) {
+                throw new \Exception('Cannot delete user with active bookings. Please delete all bookings first.');
+            }
+        });
     }
 
 }

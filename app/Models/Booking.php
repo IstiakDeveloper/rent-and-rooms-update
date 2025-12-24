@@ -29,6 +29,9 @@ class Booking extends Model
         'next_renewal_date',
         'renewal_status',
         'milestone_breakdown',
+        'booking_verification_token',
+        'booking_verified_at',
+        'requires_booking_verification',
     ];
 
     /**
@@ -45,8 +48,11 @@ class Booking extends Model
         'from_date' => 'date',
         'to_date' => 'date',
         'room_ids' => 'json',
+        'milestone_breakdown' => 'json',
         'auto_renewal' => 'boolean',
         'renewal_period_days' => 'integer',
+        'booking_verified_at' => 'datetime',
+        'requires_booking_verification' => 'boolean',
         'next_renewal_date' => 'datetime',
     ];
 
@@ -187,4 +193,34 @@ class Booking extends Model
         return $query->where('payment_status', 'pending');
     }
 
+    /**
+     * Check if booking is verified
+     */
+    public function isVerified(): bool
+    {
+        return !is_null($this->booking_verified_at);
+    }
+
+    /**
+     * Mark booking as verified
+     */
+    public function markAsVerified(): void
+    {
+        $this->update([
+            'booking_verified_at' => now(),
+            'booking_verification_token' => null,
+        ]);
+    }
+
+    /**
+     * Generate verification token
+     */
+    public function generateVerificationToken(): string
+    {
+        $token = bin2hex(random_bytes(32));
+        $this->update(['booking_verification_token' => $token]);
+        return $token;
+    }
+
 }
+

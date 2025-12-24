@@ -18,7 +18,8 @@ class BookingPayment extends Model
         'payment_status',
         'payment_method',
         'transaction_reference',
-        'paid_at'
+        'paid_at',
+        'is_booking_fee'
     ];
 
     protected $casts = [

@@ -5,7 +5,8 @@ namespace App\Livewire\Admin;
 use App\Models\Message;
 use App\Models\User;
 use Livewire\Component;
-use SendGrid\Mail\Mail as SendGridMail;
+use Illuminate\Support\Facades\Mail;
+use App\Mail\UserNotification;
 
 class SendMailComponent extends Component
 {
@@ -66,33 +67,26 @@ class SendMailComponent extends Component
         // Fetch the selected users
         $users = User::whereIn('id', $this->selectedUsers)->get();
         $userNames = [];
-        
-        $sendgrid = new \SendGrid(env('SENDGRID_API_KEY'));
+
         foreach ($users as $user) {
             try {
-                $email = new SendGridMail();
-                $email->setFrom("rentandrooms@gmail.com", "Rent and Rooms");
-                $email->setSubject("Important Notification");
-                $email->addTo($user->email, $user->name);
-                
-                $textContent = "Hello {$user->name},\n\n{$this->message}";
-                $htmlContent = "<strong>Hello {$user->name}</strong><br>" . nl2br($this->message);
-        
-                $email->addContent("text/plain", $textContent);
-                $email->addContent("text/html", $htmlContent);
-        
-                $sendgrid->send($email);
-        
+                // Send email using Laravel Mail
+                Mail::to($user->email)
+                    ->send(new UserNotification(
+                        $user->name,
+                        $this->message,
+                        'Important Notification'
+                    ));
+
                 Message::create([
                     'sender_id' => auth()->id(),
                     'recipient_id' => $user->id,
                     'message' => $this->message,
                 ]);
-        
+
                 $userNames[] = $user->name;
-        
+
             } catch (\Exception $e) {
-                logger('check');
                 \Log::error("Email failed to {$user->email}: " . $e->getMessage());
                 session()->flash('error', 'Failed to send email to ' . $user->name);
             }

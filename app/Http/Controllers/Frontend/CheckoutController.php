@@ -61,6 +61,12 @@ class CheckoutController extends Controller
             return redirect()->route('login')->with('error', 'Please login to continue booking.');
         }
 
+        // Check email verification
+        $user = Auth::user();
+        if (!$user->hasVerifiedEmail()) {
+            return redirect()->route('verification.notice')->with('error', 'Please verify your email address to continue booking.');
+        }
+
         // Get checkout data from session
         $checkoutData = $request->session()->get('checkout_data');
 
@@ -139,6 +145,16 @@ class CheckoutController extends Controller
             return response()->json(['error' => 'User must be logged in'], 401);
         }
 
+        // Check email verification
+        $user = Auth::user();
+        if (!$user->hasVerifiedEmail()) {
+            return response()->json([
+                'error' => 'Email verification required',
+                'message' => 'Please verify your email address before making a booking.',
+                'redirect' => route('verification.notice')
+            ], 403);
+        }
+
         try {
             DB::beginTransaction();
 
@@ -212,24 +228,22 @@ class CheckoutController extends Controller
             // Create milestone payments
             $this->createMilestonePayments($booking, $priceBreakdown, $bookingPrice, $fromDate);
 
-            // Handle payment based on method
-            if ($validated['paymentMethod'] === 'card') {
-                $stripeUrl = $this->handleStripePayment($booking, $paymentAmount, $package, $validated['paymentOption']);
-                DB::commit();
-                return response()->json(['success' => true, 'stripe_url' => $stripeUrl]);
-            } else {
-                $this->createPaymentRecord($booking, $paymentAmount, $validated);
-                DB::commit();
+            // Generate verification token and send email
+            $booking->generateVerificationToken();
+            $booking->user->notify(new \App\Notifications\BookingVerificationNotification($booking));
 
-                // Clear session
-                session()->forget('checkout_data');
+            DB::commit();
 
-                return response()->json([
-                    'success' => true,
-                    'booking_id' => $booking->id,
-                    'redirect_url' => route('booking.complete', $booking->id)
-                ]);
-            }
+            // Clear session
+            session()->forget('checkout_data');
+
+            // Redirect to verification pending page
+            return response()->json([
+                'success' => true,
+                'booking_id' => $booking->id,
+                'message' => 'Booking created! Please check your email to verify this booking.',
+                'redirect_url' => route('booking.verification.pending', $booking->id)
+            ]);
 
         } catch (\Exception $e) {
             DB::rollBack();
@@ -498,7 +512,17 @@ class CheckoutController extends Controller
      */
     public function bookingComplete($bookingId)
     {
+        // Check if user is authenticated and verified
+        if (!Auth::check() || !Auth::user()->hasVerifiedEmail()) {
+            return redirect()->route('verification.notice')->with('error', 'Please verify your email address.');
+        }
+
         $booking = Booking::with(['package', 'user', 'bookingPayments'])->findOrFail($bookingId);
+
+        // Ensure user owns this booking
+        if ($booking->user_id !== Auth::id()) {
+            abort(403, 'Unauthorized access to booking.');
+        }
 
         return Inertia::render('Frontend/Checkout/Complete', [
             'booking' => $booking,
@@ -515,7 +539,17 @@ class CheckoutController extends Controller
      */
     public function stripeSuccess($bookingId, Request $request)
     {
+        // Check if user is authenticated and verified
+        if (!Auth::check() || !Auth::user()->hasVerifiedEmail()) {
+            return redirect()->route('verification.notice')->with('error', 'Please verify your email address.');
+        }
+
         $booking = Booking::with(['package', 'user'])->findOrFail($bookingId);
+
+        // Ensure user owns this booking
+        if ($booking->user_id !== Auth::id()) {
+            abort(403, 'Unauthorized access to booking.');
+        }
 
         // Update booking payment status
         $booking->update(['payment_status' => 'paid', 'status' => 'confirmed']);
@@ -547,7 +581,17 @@ class CheckoutController extends Controller
      */
     public function stripeCancel($bookingId)
     {
+        // Check if user is authenticated and verified
+        if (!Auth::check() || !Auth::user()->hasVerifiedEmail()) {
+            return redirect()->route('verification.notice')->with('error', 'Please verify your email address.');
+        }
+
         $booking = Booking::with('package')->findOrFail($bookingId);
+
+        // Ensure user owns this booking
+        if ($booking->user_id !== Auth::id()) {
+            abort(403, 'Unauthorized access to booking.');
+        }
 
         // Optionally delete or mark booking as cancelled
         $booking->update(['status' => 'cancelled']);
@@ -555,4 +599,94 @@ class CheckoutController extends Controller
         return redirect()->route('properties.index')->with('error', 'Payment was cancelled.');
     }
 
+    /**
+     * Show verification pending page
+     */
+    public function verificationPending($bookingId)
+    {
+        $booking = Booking::with(['package', 'user'])->findOrFail($bookingId);
+
+        // Ensure user owns this booking
+        if ($booking->user_id !== Auth::id()) {
+            abort(403, 'Unauthorized access to booking.');
+        }
+
+        return Inertia::render('Frontend/Booking/VerificationPending', [
+            'booking' => $booking,
+            'footer' => Footer::with(['footerSectionTwo', 'footerSectionThree', 'footerSectionFour.socialLinks'])->first(),
+            'header' => Header::first(),
+            'countries' => Country::all(),
+            'selectedCountry' => session('selectedCountry', 1),
+        ]);
+    }
+
+    /**
+     * Verify booking with token
+     */
+    public function verifyBooking($bookingId, $token, Request $request)
+    {
+        $booking = Booking::findOrFail($bookingId);
+
+        // Verify ownership
+        if ($booking->user_id !== Auth::id()) {
+            abort(403, 'Unauthorized access to booking.');
+        }
+
+        // Check if already verified
+        if ($booking->isVerified()) {
+            return redirect()->route('booking.complete', $booking->id)
+                ->with('message', 'This booking has already been verified.');
+        }
+
+        // Verify token
+        if ($booking->booking_verification_token !== $token) {
+            return redirect()->route('booking.verification.pending', $booking->id)
+                ->with('error', 'Invalid verification token.');
+        }
+
+        // Mark as verified
+        $booking->markAsVerified();
+
+        // Process payment based on saved payment details
+        $payment = Payment::where('booking_id', $booking->id)->first();
+
+        if ($payment && $payment->status === 'pending') {
+            // Update booking to confirmed if it was bank transfer
+            if ($payment->payment_method === 'bank_transfer') {
+                $booking->update(['status' => 'pending']); // Pending admin approval
+            }
+        }
+
+        return redirect()->route('booking.complete', $booking->id)
+            ->with('success', 'Booking verified successfully! Your booking is now being processed.');
+    }
+
+    /**
+     * Resend booking verification email
+     */
+    public function resendVerification($bookingId)
+    {
+        $booking = Booking::findOrFail($bookingId);
+
+        // Verify ownership
+        if ($booking->user_id !== Auth::id()) {
+            return response()->json(['error' => 'Unauthorized'], 403);
+        }
+
+        // Check if already verified
+        if ($booking->isVerified()) {
+            return response()->json(['error' => 'Booking already verified'], 400);
+        }
+
+        // Generate new token and send email
+        $booking->generateVerificationToken();
+        $booking->user->notify(new \App\Notifications\BookingVerificationNotification($booking));
+
+        return response()->json([
+            'success' => true,
+            'message' => 'Verification email has been resent!'
+        ]);
+    }
+
 }
+

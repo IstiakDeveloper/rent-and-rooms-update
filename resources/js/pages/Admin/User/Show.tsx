@@ -1,5 +1,5 @@
 import React, { useState } from 'react';
-import { Head, router } from '@inertiajs/react';
+import { Head, router, usePage } from '@inertiajs/react';
 import { ArrowLeft, User, CreditCard, FileText, Settings, Download, Mail, Link2, Trash2, Package } from 'lucide-react';
 import AdminLayout from '@/layouts/AdminLayout';
 import UserInfo from './Components/UserInfo';
@@ -8,6 +8,7 @@ import DocumentSection from './Components/DocumentSection';
 import PartnerSection from './Components/PartnerSection';
 import EditUserModal from './Components/Modals/EditUserModal';
 import MilestoneModal from './Components/Modals/MilestoneModal';
+import Toast from '@/components/Toast';
 import axios from 'axios';
 
 interface User {
@@ -29,7 +30,12 @@ interface Booking {
     price: number;
     booking_price: number;
     payment_status: string;
-    package?: { name: string };
+    package?: {
+        id?: number;
+        name: string;
+        title?: string;
+        address?: string;
+    };
     payments: Array<{
         id: number;
         amount: string;
@@ -69,6 +75,26 @@ interface Document {
     uploaded_at: string;
 }
 
+interface PartnerDocument {
+    id: number;
+    user_id: number;
+    // Partner Personal Documents
+    photo_id?: string;
+    photo_id_expiry?: string;
+    authorised_letter?: string;
+    authorised_letter_expiry?: string;
+    management_agreement?: string;
+    management_agreement_expiry?: string;
+    management_maintain_agreement?: string;
+    management_maintain_agreement_expiry?: string;
+    franchise_agreement?: string;
+    franchise_agreement_expiry?: string;
+    investor_agreement?: string;
+    investor_agreement_expiry?: string;
+    created_at: string;
+    updated_at: string;
+}
+
 interface PageProps {
     user: User;
     bookings: Booking[];
@@ -91,17 +117,41 @@ interface PageProps {
         end_date?: string;
         monthly_rent?: number;
     };
+    partnerDocuments?: PartnerDocument | null;
+    partnerDocumentItems?: Array<{
+        id: number;
+        document_type: 'partner' | 'package';
+        document_name: string;
+        file_path: string | null;
+        expiry_date: string | null;
+        status: 'active' | 'expired' | 'pending';
+        notes: string | null;
+        created_at: string;
+        updated_at: string;
+        file_url: string | null;
+    }>;
 }
 
-export default function Show({ user, bookings, packages, documents, bankDetails, agreementDetails }: PageProps) {
+export default function Show({ user, bookings, packages, documents, bankDetails, agreementDetails, partnerDocuments, partnerDocumentItems = [] }: PageProps) {
     const [editUserModalOpen, setEditUserModalOpen] = useState(false);
     const [milestoneModalOpen, setMilestoneModalOpen] = useState(false);
     const [selectedBookingId, setSelectedBookingId] = useState<number | null>(null);
+    const [isDownloading, setIsDownloading] = useState(false);
+    const [isEmailing, setIsEmailing] = useState(false);
+    const [loadingBookingId, setLoadingBookingId] = useState<number | null>(null);
+    const [toast, setToast] = useState<{ message: string; type: 'success' | 'error' | 'warning' | 'info' } | null>(null);
 
     // Check if user is a Partner
     const isPartner = user.roles?.some(role => role.name.toLowerCase() === 'partner') || user.role?.toLowerCase() === 'partner';
 
+    const showToast = (message: string, type: 'success' | 'error' | 'warning' | 'info') => {
+        setToast({ message, type });
+    };
+
     const handleDownloadInvoice = async (bookingId: number) => {
+        setIsDownloading(true);
+        setLoadingBookingId(bookingId);
+
         try {
             const response = await axios.get(
                 `/admin/users/${user.id}/booking/${bookingId}/invoice/download`,
@@ -116,22 +166,32 @@ export default function Show({ user, bookings, packages, documents, bankDetails,
             link.click();
             link.remove();
 
-            alert('Invoice downloaded successfully!');
+            setIsDownloading(false);
+            setLoadingBookingId(null);
+            showToast('Invoice downloaded successfully!', 'success');
         } catch (error: any) {
             console.error('Download invoice error:', error);
-            const errorMsg = error.response?.data?.message || 'Failed to download invoice. Please try again.';
-            alert(errorMsg);
+            setIsDownloading(false);
+            setLoadingBookingId(null);
+            showToast('Failed to download invoice. Please try again.', 'error');
         }
     };
 
     const handleEmailInvoice = async (bookingId: number) => {
+        setIsEmailing(true);
+        setLoadingBookingId(bookingId);
+
         try {
             await axios.post(`/admin/users/${user.id}/booking/${bookingId}/invoice/email`);
-            alert('Invoice sent successfully to ' + user.email);
+
+            setIsEmailing(false);
+            setLoadingBookingId(null);
+            showToast(`Invoice has been successfully emailed to ${user.email}`, 'success');
         } catch (error: any) {
             console.error('Email invoice error:', error);
-            const errorMsg = error.response?.data?.message || 'Failed to send invoice. Please try again.';
-            alert(errorMsg);
+            setIsEmailing(false);
+            setLoadingBookingId(null);
+            showToast('Failed to send invoice email. Please try again.', 'error');
         }
     };
 
@@ -143,12 +203,10 @@ export default function Show({ user, bookings, packages, documents, bankDetails,
     const handleUpdatePaymentStatus = async (paymentId: number, status: string) => {
         try {
             await axios.patch(`/admin/users/${user.id}/payments/${paymentId}/status`, { status });
-            alert(`Payment status updated to ${status} successfully!`);
             router.reload();
         } catch (error: any) {
             console.error('Update payment status error:', error);
-            const errorMsg = error.response?.data?.message || 'Failed to update payment status. Please try again.';
-            alert(errorMsg);
+            router.reload();
         }
     };
 
@@ -164,7 +222,7 @@ export default function Show({ user, bookings, packages, documents, bankDetails,
 
             router.reload();
         } catch (error) {
-            alert('Failed to upload document');
+            router.reload();
         }
     };
 
@@ -175,7 +233,7 @@ export default function Show({ user, bookings, packages, documents, bankDetails,
             await axios.delete(`/users/${user.id}/documents/${documentId}`);
             router.reload();
         } catch (error) {
-            alert('Failed to delete document');
+            router.reload();
         }
     };
 
@@ -184,7 +242,7 @@ export default function Show({ user, bookings, packages, documents, bankDetails,
             await axios.put(`/users/${user.id}/bank-details`, data);
             router.reload();
         } catch (error) {
-            alert('Failed to update bank details');
+            router.reload();
         }
     };
 
@@ -193,7 +251,7 @@ export default function Show({ user, bookings, packages, documents, bankDetails,
             await axios.put(`/users/${user.id}/agreement-details`, data);
             router.reload();
         } catch (error) {
-            alert('Failed to update agreement details');
+            router.reload();
         }
     };
 
@@ -209,7 +267,7 @@ export default function Show({ user, bookings, packages, documents, bankDetails,
 
             router.reload();
         } catch (error) {
-            alert('Failed to upload package document');
+            router.reload();
         }
     };
 
@@ -220,7 +278,7 @@ export default function Show({ user, bookings, packages, documents, bankDetails,
             await axios.delete(`/users/${user.id}/packages/${packageId}/documents/${type}`);
             router.reload();
         } catch (error) {
-            alert('Failed to delete package document');
+            router.reload();
         }
     };
 
@@ -272,7 +330,7 @@ export default function Show({ user, bookings, packages, documents, bankDetails,
                                     </div>
                                 </div>
 
-                                <div className="flex items-center space-x-3">
+                                {/* <div className="flex items-center space-x-3">
                                     <button
                                         onClick={() => setEditUserModalOpen(true)}
                                         className="inline-flex items-center px-4 py-2 border border-transparent text-sm font-medium rounded-lg shadow-sm text-white bg-gradient-to-r from-indigo-600 to-purple-600 hover:from-indigo-700 hover:to-purple-700 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-indigo-500 transition-all duration-200"
@@ -280,7 +338,7 @@ export default function Show({ user, bookings, packages, documents, bankDetails,
                                         <Settings className="h-4 w-4 mr-2" />
                                         Edit User
                                     </button>
-                                </div>
+                                </div> */}
                             </div>
                         </div>
                     </div>
@@ -339,48 +397,60 @@ export default function Show({ user, bookings, packages, documents, bankDetails,
                         <>
                             {/* Bookings Section */}
                             {bookings.length > 0 && (
-                        <div className="mb-8">
-                            <div className="bg-white rounded-2xl shadow-lg shadow-gray-200 border border-gray-200 overflow-hidden">
-                                <div className="p-8 border-b border-gray-200 bg-gradient-to-r from-blue-50 to-indigo-50">
-                                    <div className="flex items-center justify-between">
-                                        <div className="flex items-center space-x-3">
-                                            <div className="flex-shrink-0">
-                                                <div className="w-10 h-10 bg-gradient-to-r from-blue-500 to-indigo-600 rounded-lg flex items-center justify-center">
-                                                    <CreditCard className="h-5 w-5 text-white" />
+                                <div className="mb-8">
+                                    <div className="bg-white rounded-2xl shadow-lg shadow-gray-200 border border-gray-200 overflow-hidden">
+                                        <div className="p-8 border-b border-gray-200 bg-gradient-to-r from-blue-50 to-indigo-50">
+                                            <div className="flex items-center justify-between">
+                                                <div className="flex items-center space-x-3">
+                                                    <div className="flex-shrink-0">
+                                                        <div className="w-10 h-10 bg-gradient-to-r from-blue-500 to-indigo-600 rounded-lg flex items-center justify-center">
+                                                            <CreditCard className="h-5 w-5 text-white" />
+                                                        </div>
+                                                    </div>
+                                                    <div>
+                                                        <h2 className="text-2xl font-bold text-gray-900">User Bookings</h2>
+                                                        <p className="text-sm text-gray-600 mt-1">Manage user bookings and payments</p>
+                                                    </div>
+                                                </div>
+                                                <div className="text-sm text-gray-500 bg-white px-4 py-2 rounded-lg shadow-sm">
+                                                    <span className="font-semibold text-gray-700">{bookings.length}</span> active booking(s)
                                                 </div>
                                             </div>
-                                            <div>
-                                                <h2 className="text-2xl font-bold text-gray-900">User Bookings</h2>
-                                                <p className="text-sm text-gray-600 mt-1">Manage user bookings and payments</p>
+                                        </div>
+
+                                        <div className="p-8">
+                                            <div className="space-y-6">
+                                                {bookings.map((booking) => (
+                                                    <div key={booking.id} className="relative">
+                                                        {/* Loading Overlay */}
+                                                        {loadingBookingId === booking.id && (isDownloading || isEmailing) && (
+                                                            <div className="absolute inset-0 bg-white/80 backdrop-blur-sm rounded-xl z-10 flex items-center justify-center">
+                                                                <div className="flex flex-col items-center space-y-3">
+                                                                    <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-indigo-600"></div>
+                                                                    <p className="text-sm font-medium text-gray-700">
+                                                                        {isDownloading ? 'Downloading Invoice...' : 'Sending Email...'}
+                                                                    </p>
+                                                                </div>
+                                                            </div>
+                                                        )}
+                                                        <BookingCard
+                                                            booking={booking}
+                                                            onDownloadInvoice={() => handleDownloadInvoice(booking.id)}
+                                                            onEmailInvoice={() => handleEmailInvoice(booking.id)}
+                                                            onGeneratePaymentLink={() => handleGeneratePaymentLink(booking.id)}
+                                                            onUpdatePaymentStatus={(paymentId, status) =>
+                                                                handleUpdatePaymentStatus(paymentId, status)
+                                                            }
+                                                        />
+                                                    </div>
+                                                ))}
                                             </div>
                                         </div>
-                                        <div className="text-sm text-gray-500 bg-white px-4 py-2 rounded-lg shadow-sm">
-                                            <span className="font-semibold text-gray-700">{bookings.length}</span> active booking(s)
-                                        </div>
                                     </div>
                                 </div>
+                            )}
 
-                                <div className="p-8">
-                                    <div className="space-y-6">
-                                        {bookings.map((booking) => (
-                                            <BookingCard
-                                                key={booking.id}
-                                                booking={booking}
-                                                onDownloadInvoice={() => handleDownloadInvoice(booking.id)}
-                                                onEmailInvoice={() => handleEmailInvoice(booking.id)}
-                                                onGeneratePaymentLink={() => handleGeneratePaymentLink(booking.id)}
-                                                onUpdatePaymentStatus={(paymentId, status) =>
-                                                    handleUpdatePaymentStatus(paymentId, status)
-                                                }
-                                            />
-                                        ))}
-                                    </div>
-                                </div>
-                            </div>
-                        </div>
-                    )}
-
-                    {/* Empty State */}
+                            {/* Empty State */}
                             {/* Empty State */}
                             {bookings.length === 0 && (
                                 <div className="bg-white rounded-2xl shadow-lg shadow-gray-200 border border-gray-200 p-12 text-center">
@@ -408,6 +478,8 @@ export default function Show({ user, bookings, packages, documents, bankDetails,
                                 packages={packages}
                                 bankDetails={bankDetails}
                                 agreementDetails={agreementDetails}
+                                partnerDocuments={partnerDocuments}
+                                partnerDocumentItems={partnerDocumentItems}
                             />
                         </div>
                     )}
@@ -431,6 +503,15 @@ export default function Show({ user, bookings, packages, documents, bankDetails,
                         setMilestoneModalOpen(false);
                         setSelectedBookingId(null);
                     }}
+                />
+            )}
+
+            {/* Toast Notification */}
+            {toast && (
+                <Toast
+                    message={toast.message}
+                    type={toast.type}
+                    onClose={() => setToast(null)}
                 />
             )}
         </AdminLayout>

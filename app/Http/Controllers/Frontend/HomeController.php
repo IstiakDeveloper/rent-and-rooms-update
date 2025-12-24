@@ -11,6 +11,7 @@ use App\Models\Header;
 use App\Models\HeroSection;
 use App\Models\HomeData;
 use App\Models\Package;
+use App\Models\PropertyType;
 use Illuminate\Http\Request;
 use Inertia\Inertia;
 
@@ -33,8 +34,8 @@ class HomeController extends Controller
         $packages = null;
         $noPackagesFound = false;
 
-        if ($request->filled('city_id') || $request->filled('area_id') || $request->filled('keyword')) {
-            $query = Package::with(['country', 'city', 'area', 'rooms.roomPrices', 'entireProperty.prices', 'photos', 'creator', 'assignedPartner']);
+        if ($request->filled('city_id') || $request->filled('area_id') || $request->filled('property_type_id')) {
+            $query = Package::with(['country', 'city', 'area', 'property.propertyType', 'rooms.roomPrices', 'entireProperty.prices', 'photos', 'creator', 'assignedPartner']);
 
             if ($selectedCountry) {
                 $query->where('country_id', $selectedCountry);
@@ -45,11 +46,9 @@ class HomeController extends Controller
             if ($request->filled('area_id')) {
                 $query->where('area_id', $request->area_id);
             }
-            if ($request->filled('keyword')) {
-                $keyword = $request->keyword;
-                $query->where(function($q) use ($keyword) {
-                    $q->where('name', 'like', '%' . $keyword . '%')
-                      ->orWhere('address', 'like', '%' . $keyword . '%');
+            if ($request->filled('property_type_id')) {
+                $query->whereHas('property', function($q) use ($request) {
+                    $q->where('property_type_id', $request->property_type_id);
                 });
             }
 
@@ -81,6 +80,9 @@ class HomeController extends Controller
         // All countries for selector
         $countries = Country::all();
 
+        // Get all property types
+        $propertyTypes = PropertyType::select('id', 'type')->get();
+
         return Inertia::render('Frontend/Home', [
             'cities' => $cities,
             'areas' => $areas,
@@ -93,10 +95,11 @@ class HomeController extends Controller
             'homeData' => $homeData,
             'countries' => $countries,
             'selectedCountry' => $selectedCountry,
+            'propertyTypes' => $propertyTypes,
             'filters' => [
                 'city_id' => $request->city_id,
                 'area_id' => $request->area_id,
-                'keyword' => $request->keyword,
+                'property_type_id' => $request->property_type_id,
             ],
         ]);
     }

@@ -17,6 +17,10 @@ class DashboardController extends Controller
     public function index(Request $request)
     {
         $user = Auth::user();
+        $userRoles = $user->roles->pluck('name');
+        $isSuperAdmin = $userRoles->contains('Super Admin');
+        $isAdmin = $userRoles->contains('Admin');
+        $isPartner = $userRoles->contains('Partner');
         $filterPeriod = $request->get('filter_period', 'month');
 
         // Initialize dashboard data
@@ -52,76 +56,255 @@ class DashboardController extends Controller
         // Get date range based on filter period
         $dateRange = $this->getDateRange($filterPeriod);
 
-        // Load revenue data
-        $revenueData = $this->loadRevenueData($filterPeriod, $dateRange);
+        // Load revenue data based on role
+        $revenueData = $this->loadRevenueData($filterPeriod, $dateRange, $user, $isPartner, $isAdmin);
         $dashboardData = array_merge($dashboardData, $revenueData);
 
-        // Common user stats
-        $dashboardData['totalUsers'] = User::count(); // Remove role filter for now
-        $dashboardData['totalPartner'] = User::count(); // Will need to implement role logic later
+        // Role-based data filtering
+        if ($isPartner) {
+            // Partner sees only their assigned packages and related data
+            $dashboardData['totalPackages'] = Package::where('assigned_to', $user->id)->count();
+            $dashboardData['totalBookings'] = Booking::whereHas('package', function($query) use ($user) {
+                $query->where('assigned_to', $user->id);
+            })->count();
 
-        // User-specific data
-        $dashboardData['activePackages'] = $user->bookings()->count(); // Remove scope for now
-        $dashboardData['upcomingBookings'] = $user->bookings()->count(); // Remove scope for now
-        $dashboardData['totalSpent'] = $user->bookings()
-            ->where('payment_status', 'completed')
-            ->sum('total_amount');
+            $dashboardData['partnerPackages'] = $dashboardData['totalPackages'];
+            $dashboardData['partnerBookings'] = $dashboardData['totalBookings'];
 
-        $dashboardData['totalPackages'] = Package::where('user_id', $user->id)->count();
-        $dashboardData['totalBookings'] = Booking::whereHas('package', function ($query) use ($user) {
-            $query->where('user_id', $user->id);
-        })->count();
+            $dashboardData['partnerUsers'] = User::whereHas('bookings.package', function($query) use ($user) {
+                $query->where('assigned_to', $user->id);
+            })->distinct()->count();
 
-        // Super Admin specific logic (will need to implement role check later)
-        if (true) { // Replace with proper role check
+            $dashboardData['totalUsers'] = $dashboardData['partnerUsers'];
+
+            // Partner Revenue
+            $partnerPayments = Payment::whereHas('booking.package', function($query) use ($user) {
+                $query->where('assigned_to', $user->id);
+            })->whereIn('status', ['completed', 'paid']);
+
+            if ($filterPeriod !== 'all') {
+                $partnerPayments->whereBetween('created_at', [$dateRange['start'], $dateRange['end']]);
+            }
+
+            $dashboardData['partnerRevenue'] = $partnerPayments->sum('amount');
+            $dashboardData['partnerRentIncome'] = $partnerPayments->where('payment_type', 'rent')->sum('amount');
+            $dashboardData['partnerBookingIncome'] = $partnerPayments->where('payment_type', 'booking')->sum('amount');
+            $dashboardData['partnerRentPayments'] = $partnerPayments->where('payment_type', 'rent')->count();
+            $dashboardData['partnerBookingPayments'] = $partnerPayments->where('payment_type', 'booking')->count();
+
+            // Recent bookings for partner
+            $dashboardData['recentBookings'] = Booking::whereHas('package', function($query) use ($user) {
+                $query->where('assigned_to', $user->id);
+            })
+                ->with(['package.property', 'user'])
+                ->latest()
+                ->take(5)
+                ->get()
+                ->map(function($booking) {
+                    return [
+                        'id' => $booking->id,
+                        'booking_number' => $booking->booking_number ?? 'N/A',
+                        'from_date' => $booking->from_date ? \Carbon\Carbon::parse($booking->from_date)->format('Y-m-d') : null,
+                        'to_date' => $booking->to_date ? \Carbon\Carbon::parse($booking->to_date)->format('Y-m-d') : null,
+                        'created_at' => $booking->created_at ? $booking->created_at->format('Y-m-d') : null,
+                        'status' => $booking->status,
+                        'payment_status' => $booking->payment_status,
+                        'total_amount' => $booking->total_amount,
+                        'package' => $booking->package ? [
+                            'id' => $booking->package->id,
+                            'name' => $booking->package->name,
+                            'title' => $booking->package->title ?? $booking->package->name,
+                            'property' => $booking->package->property ? [
+                                'id' => $booking->package->property->id,
+                                'name' => $booking->package->property->name,
+                            ] : null,
+                        ] : null,
+                        'user' => $booking->user ? [
+                            'id' => $booking->user->id,
+                            'name' => $booking->user->name,
+                            'email' => $booking->user->email,
+                        ] : null,
+                    ];
+                });
+        } elseif ($isSuperAdmin) {
+            // Super Admin sees all data
+            $dashboardData['totalUsers'] = User::count();
+            $dashboardData['totalPartner'] = User::role('Partner')->count();
             $dashboardData['totalPackages'] = Package::count();
             $dashboardData['totalBookings'] = Booking::count();
+
+            $dashboardData['partnerPackages'] = Package::where('assigned_to', $user->id)->count();
+            $dashboardData['partnerBookings'] = Booking::whereHas('package', function($query) use ($user) {
+                $query->where('assigned_to', $user->id);
+            })->count();
+
+            $dashboardData['partnerUsers'] = User::whereHas('bookings.package', function($query) use ($user) {
+                $query->where('assigned_to', $user->id);
+            })->distinct()->count();
+
+            // Recent bookings - all bookings for Super Admin
+            $dashboardData['recentBookings'] = Booking::with(['package.property', 'user'])
+                ->latest()
+                ->take(5)
+                ->get()
+                ->map(function($booking) {
+                    return [
+                        'id' => $booking->id,
+                        'booking_number' => $booking->booking_number ?? 'N/A',
+                        'from_date' => $booking->from_date ? \Carbon\Carbon::parse($booking->from_date)->format('Y-m-d') : null,
+                        'to_date' => $booking->to_date ? \Carbon\Carbon::parse($booking->to_date)->format('Y-m-d') : null,
+                        'created_at' => $booking->created_at ? $booking->created_at->format('Y-m-d') : null,
+                        'status' => $booking->status,
+                        'payment_status' => $booking->payment_status,
+                        'total_amount' => $booking->total_amount,
+                        'package' => $booking->package ? [
+                            'id' => $booking->package->id,
+                            'name' => $booking->package->name,
+                            'title' => $booking->package->title ?? $booking->package->name,
+                            'property' => $booking->package->property ? [
+                                'id' => $booking->package->property->id,
+                                'name' => $booking->package->property->name,
+                            ] : null,
+                        ] : null,
+                        'user' => $booking->user ? [
+                            'id' => $booking->user->id,
+                            'name' => $booking->user->name,
+                            'email' => $booking->user->email,
+                        ] : null,
+                    ];
+                });
+        } elseif ($isAdmin) {
+            // Admin sees only their assigned packages data
+            $dashboardData['totalPackages'] = Package::where('admin_id', $user->id)->count();
+            $dashboardData['totalBookings'] = Booking::whereHas('package', function($query) use ($user) {
+                $query->where('admin_id', $user->id);
+            })->count();
+
+            $dashboardData['totalUsers'] = User::whereHas('bookings.package', function($query) use ($user) {
+                $query->where('admin_id', $user->id);
+            })->distinct()->count();
+
+            $dashboardData['totalPartner'] = User::role('Partner')
+                ->whereHas('assignedPackages', function($query) use ($user) {
+                    $query->where('admin_id', $user->id);
+                })->count();
+
+            $dashboardData['partnerPackages'] = $dashboardData['totalPackages'];
+            $dashboardData['partnerBookings'] = $dashboardData['totalBookings'];
+            $dashboardData['partnerUsers'] = $dashboardData['totalUsers'];
+
+            // Recent bookings - only for packages where admin is assigned
+            $dashboardData['recentBookings'] = Booking::whereHas('package', function($query) use ($user) {
+                $query->where('admin_id', $user->id);
+            })
+                ->with(['package.property', 'user'])
+                ->latest()
+                ->take(5)
+                ->get()
+                ->map(function($booking) {
+                    return [
+                        'id' => $booking->id,
+                        'booking_number' => $booking->booking_number ?? 'N/A',
+                        'from_date' => $booking->from_date ? \Carbon\Carbon::parse($booking->from_date)->format('Y-m-d') : null,
+                        'to_date' => $booking->to_date ? \Carbon\Carbon::parse($booking->to_date)->format('Y-m-d') : null,
+                        'created_at' => $booking->created_at ? $booking->created_at->format('Y-m-d') : null,
+                        'status' => $booking->status,
+                        'payment_status' => $booking->payment_status,
+                        'total_amount' => $booking->total_amount,
+                        'package' => $booking->package ? [
+                            'id' => $booking->package->id,
+                            'name' => $booking->package->name,
+                            'title' => $booking->package->title ?? $booking->package->name,
+                            'property' => $booking->package->property ? [
+                                'id' => $booking->package->property->id,
+                                'name' => $booking->package->property->name,
+                            ] : null,
+                        ] : null,
+                        'user' => $booking->user ? [
+                            'id' => $booking->user->id,
+                            'name' => $booking->user->name,
+                            'email' => $booking->user->email,
+                        ] : null,
+                    ];
+                });
+        } else {
+            // Regular user data
+            $dashboardData['activePackages'] = $user->bookings()->count();
+            $dashboardData['upcomingBookings'] = $user->bookings()->count();
+            $dashboardData['totalSpent'] = $user->bookings()
+                ->where('payment_status', 'completed')
+                ->sum('total_amount');
+
+            $dashboardData['totalPackages'] = Package::where('user_id', $user->id)->count();
+            $dashboardData['totalBookings'] = Booking::whereHas('package', function ($query) use ($user) {
+                $query->where('user_id', $user->id);
+            })->count();
+
+            $dashboardData['recentBookings'] = $user->bookings()
+                ->with(['package.property', 'user'])
+                ->latest()
+                ->take(5)
+                ->get()
+                ->map(function($booking) {
+                    return [
+                        'id' => $booking->id,
+                        'booking_number' => $booking->booking_number ?? 'N/A',
+                        'from_date' => $booking->from_date ? \Carbon\Carbon::parse($booking->from_date)->format('Y-m-d') : null,
+                        'to_date' => $booking->to_date ? \Carbon\Carbon::parse($booking->to_date)->format('Y-m-d') : null,
+                        'created_at' => $booking->created_at ? $booking->created_at->format('Y-m-d') : null,
+                        'status' => $booking->status,
+                        'payment_status' => $booking->payment_status,
+                        'total_amount' => $booking->total_amount,
+                        'package' => $booking->package ? [
+                            'id' => $booking->package->id,
+                            'name' => $booking->package->name,
+                            'title' => $booking->package->title ?? $booking->package->name,
+                            'property' => $booking->package->property ? [
+                                'id' => $booking->package->property->id,
+                                'name' => $booking->package->property->name,
+                            ] : null,
+                        ] : null,
+                        'user' => $booking->user ? [
+                            'id' => $booking->user->id,
+                            'name' => $booking->user->name,
+                            'email' => $booking->user->email,
+                        ] : null,
+                    ];
+                });
         }
-
-        // Partner specific logic (will need to implement role check later)
-        $dashboardData['partnerPackages'] = Package::where('assigned_to', $user->id)->count();
-        $dashboardData['partnerBookings'] = Booking::whereHas('package', function($query) use ($user) {
-            $query->where('assigned_to', $user->id);
-        })->count();
-
-        $dashboardData['partnerUsers'] = User::whereHas('bookings.package', function($query) use ($user) {
-            $query->where('assigned_to', $user->id);
-        })->distinct()->count();
-
-        // Partner Revenue
-        $partnerPayments = Payment::whereHas('booking.package', function($query) use ($user) {
-            $query->where('assigned_to', $user->id);
-        })->whereIn('status', ['completed', 'paid']);
-
-        if ($filterPeriod !== 'all') {
-            $partnerPayments->whereBetween('created_at', [$dateRange['start'], $dateRange['end']]);
-        }
-
-        $dashboardData['partnerRevenue'] = $partnerPayments->sum('amount');
-        $dashboardData['partnerRentIncome'] = $partnerPayments->where('payment_type', 'rent')->sum('amount');
-        $dashboardData['partnerBookingIncome'] = $partnerPayments->where('payment_type', 'booking')->sum('amount');
-        $dashboardData['partnerRentPayments'] = $partnerPayments->where('payment_type', 'rent')->count();
-        $dashboardData['partnerBookingPayments'] = $partnerPayments->where('payment_type', 'booking')->count();
-
-        // Recent bookings
-        $dashboardData['recentBookings'] = $user->bookings()
-            ->with(['package', 'user'])
-            ->latest()
-            ->take(5)
-            ->get();
 
         return Inertia::render('Admin/Dashboard/Index', $dashboardData);
     }
 
-    private function loadRevenueData($filterPeriod, $dateRange)
+    private function loadRevenueData($filterPeriod, $dateRange, $user, $isPartner, $isAdmin)
     {
         // Get rent payments
         $rentPayments = Payment::where('payment_type', 'rent')
-            ->whereIn('status', ['completed', 'paid']);
+            ->whereIn('status', ['completed', 'paid'])
+            ->when($isPartner, function($query) use ($user) {
+                return $query->whereHas('booking.package', function($q) use ($user) {
+                    $q->where('assigned_to', $user->id)->whereNotNull('admin_id');
+                });
+            })
+            ->when($isAdmin, function($query) use ($user) {
+                return $query->whereHas('booking.package', function($q) use ($user) {
+                    $q->where('admin_id', $user->id);
+                });
+            });
 
         // Get booking payments
         $bookingPayments = Payment::where('payment_type', 'booking')
-            ->whereIn('status', ['completed', 'paid']);
+            ->whereIn('status', ['completed', 'paid'])
+            ->when($isPartner, function($query) use ($user) {
+                return $query->whereHas('booking.package', function($q) use ($user) {
+                    $q->where('assigned_to', $user->id)->whereNotNull('admin_id');
+                });
+            })
+            ->when($isAdmin, function($query) use ($user) {
+                return $query->whereHas('booking.package', function($q) use ($user) {
+                    $q->where('admin_id', $user->id);
+                });
+            });
 
         if ($filterPeriod !== 'all') {
             $rentPayments->whereBetween('created_at', [$dateRange['start'], $dateRange['end']]);
@@ -139,11 +322,26 @@ class DashboardController extends Controller
         // Calculate success rate
         $totalPayments = Payment::when($filterPeriod !== 'all', function ($query) use ($dateRange) {
             return $query->whereBetween('created_at', [$dateRange['start'], $dateRange['end']]);
+        })
+        ->when($isPartner, function($query) use ($user) {
+            return $query->whereHas('booking.package', function($q) use ($user) {
+                $q->where('assigned_to', $user->id)->whereNotNull('admin_id');
+            });
+        })
+        ->when($isAdmin, function($query) use ($user) {
+            return $query->whereHas('booking.package', function($q) use ($user) {
+                $q->where('admin_id', $user->id);
+            });
         })->count();
 
         $completedPayments = Payment::whereIn('status', ['completed', 'paid'])
             ->when($filterPeriod !== 'all', function ($query) use ($dateRange) {
                 return $query->whereBetween('created_at', [$dateRange['start'], $dateRange['end']]);
+            })
+            ->when($isPartner, function($query) use ($user) {
+                return $query->whereHas('booking.package', function($q) use ($user) {
+                    $q->where('assigned_to', $user->id);
+                });
             })->count();
 
         $paymentSuccessRate = $totalPayments > 0

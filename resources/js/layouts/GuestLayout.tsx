@@ -1,6 +1,6 @@
 import React, { PropsWithChildren, useState } from 'react';
-import { Link, router } from '@inertiajs/react';
-import { Menu, X as CloseIcon, MapPin, Phone, Mail, Globe, Facebook, Instagram, Linkedin, Youtube, User, LogOut } from 'lucide-react';
+import { Link, router, usePage } from '@inertiajs/react';
+import { Menu, X as CloseIcon, MapPin, Phone, Mail, Globe, Facebook, Instagram, Linkedin, Youtube, User, LogOut, AlertCircle, CheckCircle } from 'lucide-react';
 import axios from 'axios';
 import { AuthModalProvider, useAuthModal } from '@/contexts/AuthModalContext';
 import AuthModal from '@/components/AuthModal';
@@ -9,7 +9,9 @@ interface User {
     id: number;
     name: string;
     email: string;
+    email_verified_at?: string | null;
     role?: string;
+    role_name?: string; // Spatie role name
     status?: string;
 }
 
@@ -89,12 +91,26 @@ interface Footer {
     footerSectionFour?: FooterSectionFour;
 }
 
+interface TermsCondition {
+    id: number;
+    title: string;
+    content: string;
+}
+
+interface PrivacyPolicy {
+    id: number;
+    title: string;
+    content: string;
+}
+
 interface GuestLayoutProps {
     header?: Header;
     footer?: Footer;
     countries?: Country[];
     selectedCountry?: number;
     auth?: AuthUser;
+    termsConditions?: TermsCondition[];
+    privacyPolicies?: PrivacyPolicy[];
     children?: React.ReactNode;
 }
 
@@ -104,31 +120,43 @@ function GuestLayout({
     footer,
     countries = [],
     selectedCountry = 1,
-    auth
+    auth,
+    termsConditions = [],
+    privacyPolicies = []
 }: PropsWithChildren<GuestLayoutProps>) {
     const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
     const [countryDropdownOpen, setCountryDropdownOpen] = useState(false);
     const [userDropdownOpen, setUserDropdownOpen] = useState(false);
+    const [aboutModalOpen, setAboutModalOpen] = useState(false);
+    const [contactModalOpen, setContactModalOpen] = useState(false);
+    const [termsModalOpen, setTermsModalOpen] = useState(false);
+    const [privacyModalOpen, setPrivacyModalOpen] = useState(false);
     const { openLogin, openRegister } = useAuthModal();
 
-    // Get dashboard URL based on user role
+    // Get termsConditions and privacyPolicies from Inertia page props
+    const { props } = usePage();
+    const terms = (props.termsConditions as TermsCondition[]) || termsConditions;
+    const privacy = (props.privacyPolicies as PrivacyPolicy[]) || privacyPolicies;    // Get dashboard URL based on user role
     const getDashboardUrl = (user: User | null | undefined): string => {
-        if (!user || !user.role) return '/dashboard';
+        if (!user) return '/dashboard';
 
-        const role = user.role;
+        // Check Spatie role first (role_name), then fallback to role column
+        const userRole = user.role_name || user.role;
+
+        if (!userRole) return '/dashboard';
 
         // Super Admin, Admin, and Partner go to admin dashboard
-        if (['Super Admin', 'Admin', 'Partner'].includes(role)) {
+        if (['Super Admin', 'Admin', 'Partner'].includes(userRole)) {
             return '/admin/dashboard';
         }
 
         // Guest role goes to guest dashboard
-        if (role === 'Guest') {
+        if (userRole === 'Guest') {
             return '/guest/dashboard';
         }
 
         // User role goes to guest dashboard (User = Guest)
-        if (role === 'User') {
+        if (userRole === 'User') {
             return '/guest/dashboard';
         }
 
@@ -136,18 +164,50 @@ function GuestLayout({
         return '/dashboard';
     };
 
+    // Get profile URL based on user role
+    const getProfileUrl = (user: User | null | undefined): string => {
+        if (!user) return '/profile';
+
+        // Check Spatie role first (role_name), then fallback to role column
+        const userRole = user.role_name || user.role;
+
+        if (!userRole) return '/profile';
+
+        // Super Admin, Admin, and Partner go to admin profile
+        if (['Super Admin', 'Admin', 'Partner'].includes(userRole)) {
+            return '/admin/profile';
+        }
+
+        // Guest and User roles go to guest profile
+        if (['Guest', 'User'].includes(userRole)) {
+            return '/guest/profile';
+        }
+
+        // Default fallback to guest profile
+        return '/guest/profile';
+    };
+
     // Display role - show "Guest" for User role
     const getDisplayRole = (user: User | null | undefined): string => {
-        if (!user || !user.role) return 'Guest';
+        if (!user) return 'Guest';
 
-        const role = user.role;
+        // Check Spatie role first (role_name), then fallback to role column
+        const userRole = user.role_name || user.role;
+
+        if (!userRole) return 'Guest';
 
         // If role is "User", display as "Guest"
-        if (role === 'User') return 'Guest';
+        if (userRole === 'User') return 'Guest';
 
         // Otherwise return the actual role
-        return role;
-    };    const handleCountryChange = async (countryId: number) => {
+        return userRole;
+    };
+
+    const handleVerifyEmail = () => {
+        router.visit('/email/verify');
+    };
+
+    const handleCountryChange = async (countryId: number) => {
         try {
             await axios.post('/set-country', { country_id: countryId });
             router.reload();
@@ -163,13 +223,16 @@ function GuestLayout({
 
     const currentCountry = countries.find(c => c.id === selectedCountry);
 
+    // Check if user needs email verification (not Super Admin and email not verified)
+    const needsEmailVerification = auth?.user && !auth.user.email_verified_at && auth.user.role_name !== 'Super Admin';
+
     return (
         <div className="min-h-screen bg-gray-50 flex flex-col">
             {/* Header */}
             <header className="bg-white shadow-md sticky top-0 z-50 border-b border-gray-100">
                 {/* Top Bar - Modern Gradient */}
                 <div className="bg-gradient-to-r from-indigo-600 via-purple-600 to-pink-600 text-white">
-                    <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
+                    <div className="max-w-[1920px] mx-auto px-4 sm:px-6 lg:px-8">
                         <div className="flex items-center justify-between h-12 text-xs sm:text-sm">
                             <div className="flex items-center space-x-6">
                                 {footer?.contact_number && (
@@ -234,7 +297,7 @@ function GuestLayout({
                 </div>
 
                 {/* Main Header */}
-                <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
+                <div className="max-w-[1920px] mx-auto px-4 sm:px-6 lg:px-8">
                     <div className="flex items-center justify-between h-16">
                         {/* Logo */}
                         <Link href="/" className="shrink-0">
@@ -279,19 +342,31 @@ function GuestLayout({
                                 Properties
                                 <span className="absolute bottom-0 left-1/2 w-0 h-0.5 bg-blue-600 transition-all duration-300 group-hover:w-8 group-hover:left-1/2 transform group-hover:-translate-x-1/2"></span>
                             </Link>
-                            <Link
-                                href="/about"
+                            <button
+                                onClick={() => setAboutModalOpen(true)}
                                 className="relative text-gray-700 hover:text-blue-600 font-medium transition-all duration-300 px-3 py-2 rounded-lg hover:bg-blue-50 group"
                             >
                                 About
                                 <span className="absolute bottom-0 left-1/2 w-0 h-0.5 bg-blue-600 transition-all duration-300 group-hover:w-8 group-hover:left-1/2 transform group-hover:-translate-x-1/2"></span>
-                            </Link>
-                            <Link
-                                href="/contact"
+                            </button>
+                            <button
+                                onClick={() => setContactModalOpen(true)}
+                                data-contact-trigger
                                 className="relative text-gray-700 hover:text-blue-600 font-medium transition-all duration-300 px-3 py-2 rounded-lg hover:bg-blue-50 group"
                             >
                                 Contact
                                 <span className="absolute bottom-0 left-1/2 w-0 h-0.5 bg-blue-600 transition-all duration-300 group-hover:w-8 group-hover:left-1/2 transform group-hover:-translate-x-1/2"></span>
+                            </button>
+                            <Link
+                                href="/join-with-us"
+                                className="relative px-5 py-2.5 ml-2 rounded-lg bg-gradient-to-r from-blue-600 to-indigo-600 text-white font-semibold transition-all duration-300 hover:from-blue-700 hover:to-indigo-700 hover:shadow-lg hover:shadow-blue-500/50 hover:scale-105 animate-pulse group"
+                            >
+                                <span className="relative z-10 flex items-center gap-2">
+                                    Join With Us
+                                    <svg className="w-4 h-4 transform group-hover:translate-x-1 transition-transform duration-300" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M13 7l5 5m0 0l-5 5m5-5H6" />
+                                    </svg>
+                                </span>
                             </Link>
 
                             {auth?.user ? (
@@ -342,7 +417,7 @@ function GuestLayout({
                                                     <span className="font-medium">Dashboard</span>
                                                 </Link>
                                                 <Link
-                                                    href="/profile"
+                                                    href={getProfileUrl(auth?.user)}
                                                     onClick={() => setUserDropdownOpen(false)}
                                                     className="flex items-center space-x-3 px-4 py-3 text-sm text-gray-700 hover:bg-green-50 hover:text-green-700 transition-all duration-200 group"
                                                 >
@@ -423,19 +498,35 @@ function GuestLayout({
                             >
                                 Properties
                             </Link>
-                            <Link
-                                href="/about"
-                                className="block px-4 py-3 rounded-xl text-base font-medium text-gray-700 hover:bg-blue-50 hover:text-blue-600 transition-all duration-200"
-                                onClick={() => setMobileMenuOpen(false)}
+                            <button
+                                onClick={() => {
+                                    setMobileMenuOpen(false);
+                                    setAboutModalOpen(true);
+                                }}
+                                className="block w-full text-left px-4 py-3 rounded-xl text-base font-medium text-gray-700 hover:bg-blue-50 hover:text-blue-600 transition-all duration-200"
                             >
                                 About
-                            </Link>
-                            <Link
-                                href="/contact"
-                                className="block px-4 py-3 rounded-xl text-base font-medium text-gray-700 hover:bg-blue-50 hover:text-blue-600 transition-all duration-200"
-                                onClick={() => setMobileMenuOpen(false)}
+                            </button>
+                            <button
+                                onClick={() => {
+                                    setMobileMenuOpen(false);
+                                    setContactModalOpen(true);
+                                }}
+                                className="block w-full text-left px-4 py-3 rounded-xl text-base font-medium text-gray-700 hover:bg-blue-50 hover:text-blue-600 transition-all duration-200"
                             >
                                 Contact
+                            </button>
+                            <Link
+                                href="/join-with-us"
+                                className="block w-full text-center px-4 py-3 mt-3 rounded-xl text-base font-bold text-white bg-gradient-to-r from-blue-600 to-indigo-600 hover:from-blue-700 hover:to-indigo-700 transition-all duration-300 shadow-lg hover:shadow-xl hover:scale-[1.02] animate-pulse"
+                                onClick={() => setMobileMenuOpen(false)}
+                            >
+                                <span className="flex items-center justify-center gap-2">
+                                    Join With Us
+                                    <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M13 7l5 5m0 0l-5 5m5-5H6" />
+                                    </svg>
+                                </span>
                             </Link>
 
                             {auth?.user ? (
@@ -467,7 +558,7 @@ function GuestLayout({
                                             <span>Dashboard</span>
                                         </Link>
                                         <Link
-                                            href="/profile"
+                                            href={getProfileUrl(auth?.user)}
                                             className="flex items-center space-x-3 px-4 py-3 rounded-xl text-base font-medium text-gray-700 hover:bg-green-50 hover:text-green-600 transition-all duration-200"
                                             onClick={() => setMobileMenuOpen(false)}
                                         >
@@ -521,6 +612,34 @@ function GuestLayout({
                 )}
             </header>
 
+            {/* Email Verification Alert */}
+            {needsEmailVerification && (
+                <div className="bg-gradient-to-r from-yellow-50 to-amber-50 border-b-2 border-yellow-400 sticky top-0 z-40">
+                    <div className="max-w-[1920px] mx-auto px-4 sm:px-6 lg:px-8 py-4">
+                        <div className="flex items-center justify-between">
+                            <div className="flex items-center space-x-3 flex-1">
+                                <AlertCircle className="h-6 w-6 text-yellow-600 flex-shrink-0 animate-pulse" />
+                                <div className="flex-1">
+                                    <p className="text-sm font-semibold text-gray-900">
+                                        Email Verification Required
+                                    </p>
+                                    <p className="text-xs text-gray-700 mt-0.5">
+                                        Please verify your email address to access all features.
+                                    </p>
+                                </div>
+                            </div>
+                            <button
+                                onClick={handleVerifyEmail}
+                                className="ml-4 px-4 py-2 bg-gradient-to-r from-yellow-500 to-amber-600 text-white text-sm font-semibold rounded-lg hover:from-yellow-600 hover:to-amber-700 transition-all duration-300 hover:scale-105 hover:shadow-lg flex items-center space-x-2 flex-shrink-0"
+                            >
+                                <CheckCircle className="h-4 w-4" />
+                                <span>Verify Email</span>
+                            </button>
+                        </div>
+                    </div>
+                </div>
+            )}
+
             {/* Main Content */}
             <main className="flex-grow">
                 {children}
@@ -528,7 +647,7 @@ function GuestLayout({
 
             {/* Footer - Modern Design */}
             <footer className="bg-gradient-to-br from-gray-900 via-gray-800 to-gray-900 text-gray-300 border-t border-gray-800">
-                <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-16">
+                <div className="max-w-[1920px] mx-auto px-4 sm:px-6 lg:px-8 py-16">
                     <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-10">
                         {/* Column 1 - About & Logo */}
                         <div className="space-y-6">
@@ -545,51 +664,68 @@ function GuestLayout({
                             )}
 
                             <p className="text-gray-400 text-sm leading-relaxed">
-                                Your trusted platform for finding quality rental properties. We connect landlords with tenants across the UK.
+                                {footer?.address || 'Your trusted platform for finding quality rental properties. We connect landlords with tenants across the UK.'}
                             </p>
 
                             {/* Social Media Links */}
                             <div>
                                 <h4 className="text-white font-bold text-sm mb-4">Follow Us</h4>
                                 <div className="flex gap-3">
-                                    <a
-                                        href="https://www.facebook.com/rentnroomsuk"
-                                        target="_blank"
-                                        rel="noopener noreferrer"
-                                        className="w-10 h-10 rounded-xl bg-gray-800 hover:bg-blue-600 flex items-center justify-center text-gray-400 hover:text-white transition-all duration-300 transform hover:scale-110 hover:shadow-lg hover:shadow-blue-600/50"
-                                        aria-label="Facebook"
-                                    >
-                                        <Facebook className="h-5 w-5" />
-                                    </a>
-                                    <a
-                                        href="https://www.instagram.com"
-                                        target="_blank"
-                                        rel="noopener noreferrer"
-                                        className="w-10 h-10 rounded-xl bg-gray-800 hover:bg-pink-600 flex items-center justify-center text-gray-400 hover:text-white transition-all duration-300 transform hover:scale-110 hover:shadow-lg hover:shadow-pink-600/50"
-                                        aria-label="Instagram"
-                                    >
-                                        <Instagram className="h-5 w-5" />
-                                    </a>
-                                    <a
-                                        href="https://x.com"
-                                        target="_blank"
-                                        rel="noopener noreferrer"
-                                        className="w-10 h-10 rounded-xl bg-gray-800 hover:bg-black flex items-center justify-center text-gray-400 hover:text-white transition-all duration-300 transform hover:scale-110 hover:shadow-lg hover:shadow-gray-900/50"
-                                        aria-label="X (formerly Twitter)"
-                                    >
-                                        <svg className="h-5 w-5 fill-current" viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg">
-                                            <path d="M18.244 2.25h3.308l-7.227 8.26 8.502 11.24H16.17l-5.214-6.817L4.99 21.75H1.68l7.73-8.835L1.254 2.25H8.08l4.713 6.231zm-1.161 17.52h1.833L7.084 4.126H5.117z"/>
-                                        </svg>
-                                    </a>
-                                    <a
-                                        href="https://www.youtube.com/@rentandrooms"
-                                        target="_blank"
-                                        rel="noopener noreferrer"
-                                        className="w-10 h-10 rounded-xl bg-gray-800 hover:bg-red-600 flex items-center justify-center text-gray-400 hover:text-white transition-all duration-300 transform hover:scale-110 hover:shadow-lg hover:shadow-red-600/50"
-                                        aria-label="YouTube"
-                                    >
-                                        <Youtube className="h-5 w-5" />
-                                    </a>
+                                    {footer?.footerSectionFour?.socialLinks && footer.footerSectionFour.socialLinks.length > 0 ? (
+                                        footer.footerSectionFour.socialLinks.map((social) => (
+                                            <a
+                                                key={social.id}
+                                                href={social.link}
+                                                target="_blank"
+                                                rel="noopener noreferrer"
+                                                className="w-10 h-10 rounded-xl bg-gray-800 hover:bg-gradient-to-br hover:from-indigo-600 hover:to-purple-600 flex items-center justify-center text-gray-400 hover:text-white transition-all duration-300 transform hover:scale-110 hover:shadow-lg"
+                                                aria-label={social.icon_class}
+                                            >
+                                                <i className={`${social.icon_class} text-lg`}></i>
+                                            </a>
+                                        ))
+                                    ) : (
+                                        <>
+                                            <a
+                                                href="https://www.facebook.com/rentnroomsuk"
+                                                target="_blank"
+                                                rel="noopener noreferrer"
+                                                className="w-10 h-10 rounded-xl bg-gray-800 hover:bg-blue-600 flex items-center justify-center text-gray-400 hover:text-white transition-all duration-300 transform hover:scale-110 hover:shadow-lg hover:shadow-blue-600/50"
+                                                aria-label="Facebook"
+                                            >
+                                                <Facebook className="h-5 w-5" />
+                                            </a>
+                                            <a
+                                                href="https://www.instagram.com"
+                                                target="_blank"
+                                                rel="noopener noreferrer"
+                                                className="w-10 h-10 rounded-xl bg-gray-800 hover:bg-pink-600 flex items-center justify-center text-gray-400 hover:text-white transition-all duration-300 transform hover:scale-110 hover:shadow-lg hover:shadow-pink-600/50"
+                                                aria-label="Instagram"
+                                            >
+                                                <Instagram className="h-5 w-5" />
+                                            </a>
+                                            <a
+                                                href="https://x.com"
+                                                target="_blank"
+                                                rel="noopener noreferrer"
+                                                className="w-10 h-10 rounded-xl bg-gray-800 hover:bg-black flex items-center justify-center text-gray-400 hover:text-white transition-all duration-300 transform hover:scale-110 hover:shadow-lg hover:shadow-gray-900/50"
+                                                aria-label="X (formerly Twitter)"
+                                            >
+                                                <svg className="h-5 w-5 fill-current" viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg">
+                                                    <path d="M18.244 2.25h3.308l-7.227 8.26 8.502 11.24H16.17l-5.214-6.817L4.99 21.75H1.68l7.73-8.835L1.254 2.25H8.08l4.713 6.231zm-1.161 17.52h1.833L7.084 4.126H5.117z"/>
+                                                </svg>
+                                            </a>
+                                            <a
+                                                href="https://www.youtube.com/@rentandrooms"
+                                                target="_blank"
+                                                rel="noopener noreferrer"
+                                                className="w-10 h-10 rounded-xl bg-gray-800 hover:bg-red-600 flex items-center justify-center text-gray-400 hover:text-white transition-all duration-300 transform hover:scale-110 hover:shadow-lg hover:shadow-red-600/50"
+                                                aria-label="YouTube"
+                                            >
+                                                <Youtube className="h-5 w-5" />
+                                            </a>
+                                        </>
+                                    )}
                                 </div>
                             </div>
                         </div>
@@ -619,22 +755,22 @@ function GuestLayout({
                                     </Link>
                                 </li>
                                 <li>
-                                    <Link
-                                        href="/about"
+                                    <button
+                                        onClick={() => setAboutModalOpen(true)}
                                         className="text-gray-400 hover:text-indigo-400 transition-all duration-200 text-sm flex items-center group"
                                     >
                                         <span className="w-2 h-2 rounded-full bg-indigo-600 mr-3 group-hover:scale-150 transition-transform duration-200"></span>
                                         About Us
-                                    </Link>
+                                    </button>
                                 </li>
                                 <li>
-                                    <Link
-                                        href="/contact"
+                                    <button
+                                        onClick={() => setContactModalOpen(true)}
                                         className="text-gray-400 hover:text-indigo-400 transition-all duration-200 text-sm flex items-center group"
                                     >
                                         <span className="w-2 h-2 rounded-full bg-indigo-600 mr-3 group-hover:scale-150 transition-transform duration-200"></span>
                                         Contact
-                                    </Link>
+                                    </button>
                                 </li>
                                 {footer?.footerSectionTwo && footer.footerSectionTwo.map((link) => (
                                     <li key={link.id}>
@@ -658,28 +794,24 @@ function GuestLayout({
                             <ul className="space-y-3">
                                 {footer?.terms_title && footer?.terms_link && (
                                     <li>
-                                        <a
-                                            href={footer.terms_link}
-                                            target="_blank"
-                                            rel="noopener noreferrer"
+                                        <button
+                                            onClick={() => setTermsModalOpen(true)}
                                             className="text-gray-400 hover:text-purple-400 transition-all duration-200 text-sm flex items-center group"
                                         >
                                             <span className="w-2 h-2 rounded-full bg-purple-600 mr-3 group-hover:scale-150 transition-transform duration-200"></span>
                                             {footer.terms_title}
-                                        </a>
+                                        </button>
                                     </li>
                                 )}
                                 {footer?.privacy_title && footer?.privacy_link && (
                                     <li>
-                                        <a
-                                            href={footer.privacy_link}
-                                            target="_blank"
-                                            rel="noopener noreferrer"
+                                        <button
+                                            onClick={() => setPrivacyModalOpen(true)}
                                             className="text-gray-400 hover:text-purple-400 transition-all duration-200 text-sm flex items-center group"
                                         >
                                             <span className="w-2 h-2 rounded-full bg-purple-600 mr-3 group-hover:scale-150 transition-transform duration-200"></span>
                                             {footer.privacy_title}
-                                        </a>
+                                        </button>
                                     </li>
                                 )}
                                 {footer?.footerSectionThree && footer.footerSectionThree.map((link) => (
@@ -715,16 +847,9 @@ function GuestLayout({
                                         <div className="w-11 h-11 rounded-xl bg-gray-800 group-hover:bg-gradient-to-br group-hover:from-pink-600 group-hover:to-purple-600 flex items-center justify-center shrink-0 mr-3 transition-all duration-300 group-hover:shadow-lg">
                                             <Phone className="h-5 w-5 text-gray-400 group-hover:text-white transition-colors" />
                                         </div>
-                                        <div className="pt-2.5">
-                                            <a href={`tel:${footer.contact_number}`} className="text-gray-400 hover:text-pink-400 transition-colors text-sm block">
-                                                {footer.contact_number}
-                                            </a>
-                                            {footer?.website && (
-                                                <a href={`tel:${footer.website}`} className="text-gray-400 hover:text-pink-400 transition-colors text-sm block mt-1">
-                                                    {footer.website}
-                                                </a>
-                                            )}
-                                        </div>
+                                        <a href={`tel:${footer.contact_number}`} className="text-gray-400 hover:text-pink-400 transition-colors text-sm pt-2.5">
+                                            {footer.contact_number}
+                                        </a>
                                     </li>
                                 )}
                                 {footer?.email && (
@@ -737,6 +862,18 @@ function GuestLayout({
                                         </a>
                                     </li>
                                 )}
+                                <li className="flex items-start group">
+                                    <div className="w-11 h-11 rounded-xl bg-gray-800 group-hover:bg-gradient-to-br group-hover:from-pink-600 group-hover:to-purple-600 flex items-center justify-center shrink-0 mr-3 transition-all duration-300 group-hover:shadow-lg">
+                                        <svg className="h-5 w-5 text-gray-400 group-hover:text-white transition-colors" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z" />
+                                        </svg>
+                                    </div>
+                                    <div className="pt-2.5">
+                                        <p className="text-gray-400 text-sm font-semibold">Open Hours</p>
+                                        <p className="text-gray-400 text-sm">Mon to FRI</p>
+                                        <p className="text-gray-400 text-sm">11:00AM - 7:00PM</p>
+                                    </div>
+                                </li>
                             </ul>
                         </div>
                     </div>
@@ -749,6 +886,275 @@ function GuestLayout({
                     </div>
                 </div>
             </footer>
+
+            {/* About Us Modal */}
+            {aboutModalOpen && (
+                <div className="fixed inset-0 bg-black/60 backdrop-blur-sm z-50 flex items-center justify-center p-4" onClick={() => setAboutModalOpen(false)}>
+                    <div className="bg-white rounded-2xl max-w-4xl w-full max-h-[90vh] overflow-hidden shadow-2xl" onClick={(e) => e.stopPropagation()}>
+                        <div className="bg-gradient-to-r from-blue-600 to-indigo-600 p-6 flex items-center justify-between">
+                            <h2 className="text-3xl font-bold text-white">About Us</h2>
+                            <button
+                                onClick={() => setAboutModalOpen(false)}
+                                className="text-white hover:bg-white/20 rounded-full p-2 transition-colors"
+                            >
+                                <CloseIcon className="h-6 w-6" />
+                            </button>
+                        </div>
+                        <div className="p-8 overflow-y-auto max-h-[calc(90vh-88px)]">
+                            <div className="space-y-6 text-gray-700 leading-relaxed">
+                                <p className="text-lg">
+                                    <span className="font-bold text-blue-600">Rent&Rooms</span> is the UK's all-in-one solution for complete Property Digitalization and modern letting services. Designed for today's landlords and guests, our platform brings simplicity, transparency, and efficiency to every part of the property journey.
+                                </p>
+
+                                <p>
+                                    For landlords, we provide a seamless online letting platform where you can list and let your properties with ease. Our system supports full property management, including mandatory certifications, compliance tracking, and ongoing maintenance—handled by our experienced in-house maintenance team. From onboarding to ongoing care, we ensure your property remains safe, compliant, and profitable.
+                                </p>
+
+                                <p>
+                                    For guests, Rent&Rooms offers flexible accommodation options nationwide. Whether you're looking to book an entire property, rent a single room in our shared HMO accommodations, or enjoy a stay in one of our quality holiday homes or serviced apartments, we offer clean, affordable, and well-located spaces to suit every need.
+                                </p>
+
+                                <p>
+                                    At Rent&Rooms, our mission is to simplify property management while delivering comfortable, reliable, and budget-friendly stays across the UK—making us the trusted choice for both landlords and guests.
+                                </p>
+
+                                <div className="border-t-2 border-blue-200 pt-6 mt-6">
+                                    <h3 className="text-2xl font-bold text-blue-600 mb-4">Our Vision</h3>
+                                    <p className="mb-4">
+                                        At Rent&Rooms, our vision is to become the UK's leading property digitalization and accommodation network through franchising:
+                                    </p>
+
+                                    <ul className="space-y-4">
+                                        <li className="flex items-start">
+                                            <span className="inline-block w-2 h-2 bg-blue-600 rounded-full mt-2 mr-3 shrink-0"></span>
+                                            <span>Creating a unified network of Rent&Rooms franchises that deliver consistent quality in property letting, HMO room rentals, serviced accommodation, and landlord support across every region in the UK.</span>
+                                        </li>
+                                        <li className="flex items-start">
+                                            <span className="inline-block w-2 h-2 bg-blue-600 rounded-full mt-2 mr-3 shrink-0"></span>
+                                            <span>Providing franchise partners with the tools, technology, training, and operational support they need to build profitable, long-term businesses while maintaining Rent&Rooms' high standards.</span>
+                                        </li>
+                                        <li className="flex items-start">
+                                            <span className="inline-block w-2 h-2 bg-blue-600 rounded-full mt-2 mr-3 shrink-0"></span>
+                                            <span>Ensuring every Rent&Rooms branch delivers the same reliability—digital processes, mandatory compliance tracking, maintenance access, and guest satisfaction—regardless of location.</span>
+                                        </li>
+                                        <li className="flex items-start">
+                                            <span className="inline-block w-2 h-2 bg-blue-600 rounded-full mt-2 mr-3 shrink-0"></span>
+                                            <span>Continuously enhancing our digital platform, automation tools, and property management systems to help franchisees operate efficiently and scale confidently in their local markets.</span>
+                                        </li>
+                                        <li className="flex items-start">
+                                            <span className="inline-block w-2 h-2 bg-blue-600 rounded-full mt-2 mr-3 shrink-0"></span>
+                                            <span>Building a future where landlords enjoy simplified, compliant property management nationwide, while guests access clean, affordable, and well-managed accommodation wherever they go.</span>
+                                        </li>
+                                    </ul>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            )}
+
+            {/* Contact Modal */}
+            {contactModalOpen && (
+                <div className="fixed inset-0 bg-black/60 backdrop-blur-sm z-50 flex items-center justify-center p-4" onClick={() => setContactModalOpen(false)}>
+                    <div className="bg-white rounded-2xl max-w-2xl w-full overflow-hidden shadow-2xl" onClick={(e) => e.stopPropagation()}>
+                        <div className="bg-gradient-to-r from-pink-600 to-purple-600 p-6 flex items-center justify-between">
+                            <h2 className="text-3xl font-bold text-white">Contact Us</h2>
+                            <button
+                                onClick={() => setContactModalOpen(false)}
+                                className="text-white hover:bg-white/20 rounded-full p-2 transition-colors"
+                            >
+                                <CloseIcon className="h-6 w-6" />
+                            </button>
+                        </div>
+                        <div className="p-8">
+                            <div className="space-y-6">
+                                <p className="text-gray-600 text-center mb-8">
+                                    Get in touch with us. We're here to help and answer any questions you might have.
+                                </p>
+
+                                {/* Contact Information Cards */}
+                                <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+                                    {/* Address */}
+                                    <div className="bg-gradient-to-br from-blue-50 to-indigo-50 rounded-xl p-6 border border-blue-100 hover:shadow-lg transition-shadow">
+                                        <div className="flex items-start space-x-4">
+                                            <div className="w-12 h-12 bg-gradient-to-br from-blue-500 to-indigo-600 rounded-xl flex items-center justify-center shrink-0 shadow-lg">
+                                                <MapPin className="h-6 w-6 text-white" />
+                                            </div>
+                                            <div>
+                                                <h3 className="font-bold text-gray-900 mb-2">Address</h3>
+                                                <p className="text-gray-600 text-sm leading-relaxed">
+                                                    60 Sceptre Street,<br />
+                                                    Newcastle upon Tyne,<br />
+                                                    NE45JN
+                                                </p>
+                                            </div>
+                                        </div>
+                                    </div>
+
+                                    {/* Phone */}
+                                    <div className="bg-gradient-to-br from-green-50 to-emerald-50 rounded-xl p-6 border border-green-100 hover:shadow-lg transition-shadow">
+                                        <div className="flex items-start space-x-4">
+                                            <div className="w-12 h-12 bg-gradient-to-br from-green-500 to-emerald-600 rounded-xl flex items-center justify-center shrink-0 shadow-lg">
+                                                <Phone className="h-6 w-6 text-white" />
+                                            </div>
+                                            <div>
+                                                <h3 className="font-bold text-gray-900 mb-2">Call Us</h3>
+                                                <a href="tel:03301339494" className="text-green-600 hover:text-green-700 font-medium">
+                                                    03301339494
+                                                </a>
+                                            </div>
+                                        </div>
+                                    </div>
+
+                                    {/* Email */}
+                                    <div className="bg-gradient-to-br from-purple-50 to-pink-50 rounded-xl p-6 border border-purple-100 hover:shadow-lg transition-shadow">
+                                        <div className="flex items-start space-x-4">
+                                            <div className="w-12 h-12 bg-gradient-to-br from-purple-500 to-pink-600 rounded-xl flex items-center justify-center shrink-0 shadow-lg">
+                                                <Mail className="h-6 w-6 text-white" />
+                                            </div>
+                                            <div>
+                                                <h3 className="font-bold text-gray-900 mb-2">Email Us</h3>
+                                                <a href="mailto:rentandrooms@gmail.com" className="text-purple-600 hover:text-purple-700 font-medium break-all">
+                                                    rentandrooms@gmail.com
+                                                </a>
+                                            </div>
+                                        </div>
+                                    </div>
+
+                                    {/* Open Hours */}
+                                    <div className="bg-gradient-to-br from-orange-50 to-amber-50 rounded-xl p-6 border border-orange-100 hover:shadow-lg transition-shadow">
+                                        <div className="flex items-start space-x-4">
+                                            <div className="w-12 h-12 bg-gradient-to-br from-orange-500 to-amber-600 rounded-xl flex items-center justify-center shrink-0 shadow-lg">
+                                                <svg className="h-6 w-6 text-white" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z" />
+                                                </svg>
+                                            </div>
+                                            <div>
+                                                <h3 className="font-bold text-gray-900 mb-2">Open Hours</h3>
+                                                <p className="text-gray-600 text-sm">
+                                                    <span className="font-semibold">Mon to FRI</span><br />
+                                                    11:00AM - 7:00PM
+                                                </p>
+                                            </div>
+                                        </div>
+                                    </div>
+                                </div>
+
+                                {/* Social Media */}
+                                <div className="mt-8 pt-6 border-t border-gray-200">
+                                    <h3 className="font-bold text-gray-900 text-center mb-4">Follow Us</h3>
+                                    <div className="flex justify-center gap-4">
+                                        <a
+                                            href="https://www.facebook.com/rentnroomsuk"
+                                            target="_blank"
+                                            rel="noopener noreferrer"
+                                            className="w-12 h-12 rounded-xl bg-blue-600 hover:bg-blue-700 flex items-center justify-center text-white transition-all duration-300 transform hover:scale-110 hover:shadow-lg"
+                                        >
+                                            <Facebook className="h-6 w-6" />
+                                        </a>
+                                        <a
+                                            href="https://www.instagram.com"
+                                            target="_blank"
+                                            rel="noopener noreferrer"
+                                            className="w-12 h-12 rounded-xl bg-pink-600 hover:bg-pink-700 flex items-center justify-center text-white transition-all duration-300 transform hover:scale-110 hover:shadow-lg"
+                                        >
+                                            <Instagram className="h-6 w-6" />
+                                        </a>
+                                        <a
+                                            href="https://x.com"
+                                            target="_blank"
+                                            rel="noopener noreferrer"
+                                            className="w-12 h-12 rounded-xl bg-black hover:bg-gray-900 flex items-center justify-center text-white transition-all duration-300 transform hover:scale-110 hover:shadow-lg"
+                                        >
+                                            <svg className="h-6 w-6 fill-current" viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg">
+                                                <path d="M18.244 2.25h3.308l-7.227 8.26 8.502 11.24H16.17l-5.214-6.817L4.99 21.75H1.68l7.73-8.835L1.254 2.25H8.08l4.713 6.231zm-1.161 17.52h1.833L7.084 4.126H5.117z"/>
+                                            </svg>
+                                        </a>
+                                        <a
+                                            href="https://www.youtube.com/@rentandrooms"
+                                            target="_blank"
+                                            rel="noopener noreferrer"
+                                            className="w-12 h-12 rounded-xl bg-red-600 hover:bg-red-700 flex items-center justify-center text-white transition-all duration-300 transform hover:scale-110 hover:shadow-lg"
+                                        >
+                                            <Youtube className="h-6 w-6" />
+                                        </a>
+                                    </div>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            )}
+
+            {/* Terms and Conditions Modal */}
+            {termsModalOpen && (
+                <div className="fixed inset-0 bg-black/60 backdrop-blur-sm z-50 flex items-center justify-center p-4" onClick={() => setTermsModalOpen(false)}>
+                    <div className="bg-white rounded-2xl max-w-4xl w-full max-h-[90vh] overflow-hidden shadow-2xl" onClick={(e) => e.stopPropagation()}>
+                        <div className="bg-gradient-to-r from-purple-600 to-pink-600 p-6 flex items-center justify-between">
+                            <h2 className="text-3xl font-bold text-white">Terms & Conditions</h2>
+                            <button
+                                onClick={() => setTermsModalOpen(false)}
+                                className="text-white hover:bg-white/20 rounded-full p-2 transition-colors"
+                            >
+                                <CloseIcon className="h-6 w-6" />
+                            </button>
+                        </div>
+                        <div className="p-8 overflow-y-auto max-h-[calc(90vh-88px)]">
+                            <div className="space-y-6 text-gray-700 leading-relaxed">
+                                {terms && terms.length > 0 ? (
+                                    terms.map((term) => (
+                                        <div key={term.id} className="border-b border-gray-200 pb-4 last:border-b-0">
+                                            <h3 className="text-xl font-bold text-purple-600 mb-3">{term.title}</h3>
+                                            <div className="text-gray-700 whitespace-pre-line leading-relaxed">
+                                                {term.content}
+                                            </div>
+                                        </div>
+                                    ))
+                                ) : (
+                                    <p className="text-gray-600 text-center py-8">
+                                        No terms and conditions available at the moment.
+                                    </p>
+                                )}
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            )}
+
+            {/* Privacy Policy Modal */}
+            {privacyModalOpen && (
+                <div className="fixed inset-0 bg-black/60 backdrop-blur-sm z-50 flex items-center justify-center p-4" onClick={() => setPrivacyModalOpen(false)}>
+                    <div className="bg-white rounded-2xl max-w-4xl w-full max-h-[90vh] overflow-hidden shadow-2xl" onClick={(e) => e.stopPropagation()}>
+                        <div className="bg-gradient-to-r from-green-600 to-teal-600 p-6 flex items-center justify-between">
+                            <h2 className="text-3xl font-bold text-white">Privacy Policy</h2>
+                            <button
+                                onClick={() => setPrivacyModalOpen(false)}
+                                className="text-white hover:bg-white/20 rounded-full p-2 transition-colors"
+                            >
+                                <CloseIcon className="h-6 w-6" />
+                            </button>
+                        </div>
+                        <div className="p-8 overflow-y-auto max-h-[calc(90vh-88px)]">
+                            <div className="space-y-6 text-gray-700 leading-relaxed">
+                                {privacy && privacy.length > 0 ? (
+                                    privacy.map((policy) => (
+                                        <div key={policy.id} className="border-b border-gray-200 pb-4 last:border-b-0">
+                                            <h3 className="text-xl font-bold text-green-600 mb-3">{policy.title}</h3>
+                                            <div className="text-gray-700 whitespace-pre-line leading-relaxed">
+                                                {policy.content}
+                                            </div>
+                                        </div>
+                                    ))
+                                ) : (
+                                    <p className="text-gray-600 text-center py-8">
+                                        No privacy policy available at the moment.
+                                    </p>
+                                )}
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            )}
         </div>
     );
 }
@@ -763,7 +1169,7 @@ function GuestLayoutWithModal(props: GuestLayoutProps) {
 }
 
 // Inner component that uses the context
-function GuestLayoutContent({ children, header, footer, countries, selectedCountry, auth }: GuestLayoutProps) {
+function GuestLayoutContent({ children, header, footer, countries, selectedCountry, auth, termsConditions, privacyPolicies }: GuestLayoutProps) {
     const { isOpen, activeTab, closeModal } = useAuthModal();
 
     return (
@@ -774,6 +1180,8 @@ function GuestLayoutContent({ children, header, footer, countries, selectedCount
                 countries={countries}
                 selectedCountry={selectedCountry}
                 auth={auth}
+                termsConditions={termsConditions}
+                privacyPolicies={privacyPolicies}
             >
                 {children}
             </GuestLayout>

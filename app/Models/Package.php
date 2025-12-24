@@ -25,7 +25,9 @@ class Package extends Model
         'video_link',
         'common_bathrooms',
         'assigned_to',
+        'admin_id',
         'assigned_by',
+        'franchise_id',
         'assigned_at',
         'expiration_date',
         'status',
@@ -150,9 +152,20 @@ class Package extends Model
     {
         return $this->belongsTo(User::class, 'assigned_to');
     }
+
+    public function assignedAdmin()
+    {
+        return $this->belongsTo(User::class, 'admin_id');
+    }
+
     public function assignedBy()
     {
         return $this->belongsTo(User::class, 'assigned_by');
+    }
+
+    public function franchise()
+    {
+        return $this->belongsTo(User::class, 'franchise_id');
     }
 
     public function getSlugAttribute()
@@ -187,5 +200,10 @@ class Package extends Model
     public function documents()
     {
         return $this->hasMany(PackageDocument::class);
+    }
+
+    public function partnerDocumentItems()
+    {
+        return $this->hasMany(PartnerDocumentItem::class);
     }
 }

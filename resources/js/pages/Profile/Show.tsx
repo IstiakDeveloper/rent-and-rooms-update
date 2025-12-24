@@ -1,7 +1,8 @@
 import { Head, router, useForm } from '@inertiajs/react';
 import GuestDashboardLayout from '@/layouts/GuestDashboardLayout';
 import AdminLayout from '@/layouts/AdminLayout';
-import { useState } from 'react';
+import PartnerDocuments from './Components/PartnerDocuments';
+import { useState, useEffect } from 'react';
 import {
     User,
     Lock,
@@ -13,6 +14,7 @@ import {
     Edit2,
     X,
     Eye,
+    Building2,
 } from 'lucide-react';
 
 // Interfaces
@@ -23,6 +25,48 @@ interface UserDocument {
     nid_or_other?: string;
     payslip?: string;
     student_card?: string;
+}
+
+interface PartnerDocument {
+    id?: number;
+    user_id?: number;
+    photo_id?: string;
+    photo_id_expiry?: string;
+    authorised_letter?: string;
+    authorised_letter_expiry?: string;
+    management_agreement?: string;
+    management_agreement_expiry?: string;
+    management_maintain_agreement?: string;
+    management_maintain_agreement_expiry?: string;
+    franchise_agreement?: string;
+    franchise_agreement_expiry?: string;
+    investor_agreement?: string;
+    investor_agreement_expiry?: string;
+    created_at?: string;
+    updated_at?: string;
+}
+
+interface PartnerDocumentItem {
+    id: number;
+    user_id: number;
+    package_id: number;
+    document_type: 'partner' | 'package';
+    document_name: string;
+    file_path: string | null;
+    expiry_date: string | null;
+    status: 'active' | 'expired' | 'pending';
+    notes: string | null;
+    created_at: string;
+    updated_at: string;
+    file_url?: string | null;
+}
+
+interface Package {
+    id: number;
+    name: string;
+    address?: string;
+    title?: string;
+    status?: string;
 }
 
 interface AgreementDetailData {
@@ -47,16 +91,21 @@ interface UserData {
     phone?: string;
     address?: string;
     documents?: UserDocument[];
-    agreementDetail?: AgreementDetailData;
-    bankDetail?: BankDetailData;
+    partner_documents?: PartnerDocument;
+    partner_document_items?: PartnerDocumentItem[];
+    agreement_detail?: AgreementDetailData;
+    bank_detail?: BankDetailData;
+    packages?: Package[];
 }
 
 interface Props {
     user: UserData;
     role: string;
+    userPackages?: Package[];
+    availablePackages?: Package[];
 }
 
-export default function Show({ user, role }: Props) {
+export default function Show({ user, role, userPackages = [], availablePackages = [] }: Props) {
     const isPartner = role === 'Partner';
     const isAdmin = ['Super Admin', 'Admin'].includes(role);
     const isGuest = ['User', 'Guest'].includes(role);
@@ -83,16 +132,16 @@ export default function Show({ user, role }: Props) {
     });
 
     const agreementForm = useForm({
-        agreement_type: user.agreementDetail?.agreement_type || '',
-        duration: user.agreementDetail?.duration || '',
-        amount: user.agreementDetail?.amount || '',
-        deposit: user.agreementDetail?.deposit || '',
+        agreement_type: user.agreement_detail?.agreement_type || '',
+        duration: user.agreement_detail?.duration || '',
+        amount: user.agreement_detail?.amount || '',
+        deposit: user.agreement_detail?.deposit || '',
     });
 
     const bankForm = useForm({
-        name: user.bankDetail?.name || '',
-        sort_code: user.bankDetail?.sort_code || '',
-        account: user.bankDetail?.account || '',
+        name: user.bank_detail?.name || '',
+        sort_code: user.bank_detail?.sort_code || '',
+        account: user.bank_detail?.account || '',
     });
 
     const documentForm = useForm({
@@ -101,6 +150,50 @@ export default function Show({ user, role }: Props) {
         nid_or_other: null as File | null,
         payslip: null as File | null,
         student_card: null as File | null,
+    });
+
+    // Update forms when user data changes
+    useEffect(() => {
+        console.log('User data changed:', {
+            agreement_detail: user.agreement_detail,
+            bank_detail: user.bank_detail,
+            partner_documents: user.partner_documents
+        });
+
+        if (user.agreement_detail) {
+            agreementForm.setData({
+                agreement_type: user.agreement_detail.agreement_type || '',
+                duration: user.agreement_detail.duration || '',
+                amount: user.agreement_detail.amount || '',
+                deposit: user.agreement_detail.deposit || '',
+            });
+        }
+        if (user.bank_detail) {
+            bankForm.setData({
+                name: user.bank_detail.name || '',
+                sort_code: user.bank_detail.sort_code || '',
+                account: user.bank_detail.account || '',
+            });
+        }
+    }, [user.agreement_detail, user.bank_detail]);
+
+    const partnerDocumentForm = useForm({
+        hmo_licence: null as File | null,
+        hmo_licence_expiry: user.partner_documents?.hmo_licence_expiry || '',
+        gas_certificate: null as File | null,
+        gas_certificate_expiry: user.partner_documents?.gas_certificate_expiry || '',
+        eicr_certificate: null as File | null,
+        eicr_certificate_expiry: user.partner_documents?.eicr_certificate_expiry || '',
+        epc_certificate: null as File | null,
+        epc_certificate_expiry: user.partner_documents?.epc_certificate_expiry || '',
+        smoke_fire_certificate: null as File | null,
+        smoke_fire_certificate_expiry: user.partner_documents?.smoke_fire_certificate_expiry || '',
+        floor_plan: null as File | null,
+        floor_plan_expiry: user.partner_documents?.floor_plan_expiry || '',
+        agreement_paper: null as File | null,
+        agreement_paper_expiry: user.partner_documents?.agreement_paper_expiry || '',
+        authorization_letter: null as File | null,
+        authorization_letter_expiry: user.partner_documents?.authorization_letter_expiry || '',
     });
 
     // Form handlers
@@ -123,6 +216,10 @@ export default function Show({ user, role }: Props) {
         e.preventDefault();
         agreementForm.post(`${routePrefix}/profile/agreement`, {
             preserveScroll: true,
+            onSuccess: () => {
+                // Reload the page to get fresh data
+                router.reload({ only: ['user'] });
+            },
         });
     };
 
@@ -130,6 +227,10 @@ export default function Show({ user, role }: Props) {
         e.preventDefault();
         bankForm.post(`${routePrefix}/profile/bank`, {
             preserveScroll: true,
+            onSuccess: () => {
+                // Reload the page to get fresh data
+                router.reload({ only: ['user'] });
+            },
         });
     };
 
@@ -167,6 +268,10 @@ export default function Show({ user, role }: Props) {
         if (confirm('Are you sure you want to delete this agreement?')) {
             router.delete(`${routePrefix}/profile/agreement`, {
                 preserveScroll: true,
+                onSuccess: () => {
+                    // Reload the page to get fresh data
+                    router.reload({ only: ['user'] });
+                },
             });
         }
     };
@@ -197,8 +302,7 @@ export default function Show({ user, role }: Props) {
 
     const partnerTabs = [
         { id: 'personal', label: 'Personal Info', icon: User },
-        { id: 'agreement', label: 'Agreement', icon: FileText },
-        { id: 'bank', label: 'Bank Details', icon: CreditCard },
+        { id: 'partner-info', label: 'Partner Information', icon: Building2 },
     ];
 
     const adminTabs = [
@@ -474,9 +578,7 @@ export default function Show({ user, role }: Props) {
                                                 <td className="px-6 py-4 whitespace-nowrap text-sm">
                                                     {doc.passport ? (
                                                         <a
-                                                            href={`/storage/${doc.passport}`}
-                                                            target="_blank"
-                                                            rel="noopener noreferrer"
+                                                            href={`/guest/profile/documents/${doc.id}/passport/download`}
                                                             className="text-blue-600 hover:text-blue-800 flex items-center gap-1"
                                                         >
                                                             <Eye className="h-4 w-4" />
@@ -491,9 +593,7 @@ export default function Show({ user, role }: Props) {
                                                 <td className="px-6 py-4 whitespace-nowrap text-sm">
                                                     {doc.nid_or_other ? (
                                                         <a
-                                                            href={`/storage/${doc.nid_or_other}`}
-                                                            target="_blank"
-                                                            rel="noopener noreferrer"
+                                                            href={`/guest/profile/documents/${doc.id}/nid_or_other/download`}
                                                             className="text-blue-600 hover:text-blue-800 flex items-center gap-1"
                                                         >
                                                             <Eye className="h-4 w-4" />
@@ -508,9 +608,7 @@ export default function Show({ user, role }: Props) {
                                                 <td className="px-6 py-4 whitespace-nowrap text-sm">
                                                     {doc.payslip ? (
                                                         <a
-                                                            href={`/storage/${doc.payslip}`}
-                                                            target="_blank"
-                                                            rel="noopener noreferrer"
+                                                            href={`/guest/profile/documents/${doc.id}/payslip/download`}
                                                             className="text-blue-600 hover:text-blue-800 flex items-center gap-1"
                                                         >
                                                             <Eye className="h-4 w-4" />
@@ -525,9 +623,7 @@ export default function Show({ user, role }: Props) {
                                                 <td className="px-6 py-4 whitespace-nowrap text-sm">
                                                     {doc.student_card ? (
                                                         <a
-                                                            href={`/storage/${doc.student_card}`}
-                                                            target="_blank"
-                                                            rel="noopener noreferrer"
+                                                            href={`/guest/profile/documents/${doc.id}/student_card/download`}
                                                             className="text-blue-600 hover:text-blue-800 flex items-center gap-1"
                                                         >
                                                             <Eye className="h-4 w-4" />
@@ -588,7 +684,7 @@ export default function Show({ user, role }: Props) {
                                 <FileText className="h-5 w-5 text-blue-600" />
                                 Agreement Details
                             </h2>
-                            {user.agreementDetail && (
+                            {user.agreement_detail && (
                                 <button
                                     onClick={handleDeleteAgreement}
                                     className="text-red-600 hover:text-red-800 flex items-center gap-1"
@@ -671,6 +767,17 @@ export default function Show({ user, role }: Props) {
                             </button>
                         </form>
                     </div>
+                )}
+
+                {/* Tab: Partner Information (শুধু Partner এর জন্য) */}
+                {isPartner && activeTab === 'partner-info' && (
+                    <PartnerDocuments
+                        packages={userPackages}
+                        partnerDocuments={user.partner_documents}
+                        partnerDocumentItems={user.partner_document_items}
+                        bankDetails={user.bank_detail}
+                        agreementDetails={user.agreement_detail}
+                    />
                 )}
 
                 {/* Tab: Bank Details (শুধু Partner এবং Admin এর জন্য) */}

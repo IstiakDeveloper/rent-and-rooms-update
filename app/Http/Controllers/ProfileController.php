@@ -18,11 +18,35 @@ class ProfileController extends Controller
     public function show()
     {
         $user = Auth::user();
-        $user->load(['documents', 'agreementDetail', 'bankDetail', 'userDetail.package', 'bookings.package', 'bookings.bookingPayments', 'bookings.payments', 'roles']);
+        $user->load([
+            'documents',
+            'agreementDetail',
+            'bankDetail',
+            'partnerDocuments',
+            'userDetail.package',
+            'bookings.package',
+            'bookings.bookingPayments',
+            'bookings.payments',
+            'roles'
+        ]);
 
         $role = $user->roles->first()?->name ?? 'User';
 
-        return Inertia::render('Profile/Show', ['user' => $user, 'role' => $role]);
+        // Explicitly serialize the data
+        $userData = $user->toArray();
+
+        // Map camelCase relationships to snake_case for frontend
+        $userData['agreement_detail'] = $user->agreementDetail ? $user->agreementDetail->toArray() : null;
+        $userData['bank_detail'] = $user->bankDetail ? $user->bankDetail->toArray() : null;
+        $userData['partner_documents'] = $user->partnerDocuments ? $user->partnerDocuments->toArray() : null;
+
+        // Remove camelCase versions if they exist
+        unset($userData['agreementDetail'], $userData['bankDetail'], $userData['partnerDocuments']);
+
+        return Inertia::render('Profile/Show', [
+            'user' => $userData,
+            'role' => $role
+        ]);
     }
 
     public function updateProfile(Request $request)
@@ -164,5 +188,38 @@ class ProfileController extends Controller
         $user->proof_type_4 = $request->proof_type_4;
         $user->save();
         return back()->with('success', 'ID proof updated successfully');
+    }
+
+    /**
+     * Download user document
+     */
+    public function downloadDocument(UserDocument $document, string $field)
+    {
+        // Check if document belongs to current user
+        if ($document->user_id !== Auth::id()) {
+            abort(403);
+        }
+
+        $validFields = ['passport', 'nid_or_other', 'payslip', 'student_card'];
+
+        if (!in_array($field, $validFields)) {
+            abort(400, 'Invalid document field.');
+        }
+
+        $filePath = $document->$field;
+
+        if (!$filePath) {
+            abort(404, 'Document not found.');
+        }
+
+        // Check if file exists in public disk
+        if (!Storage::disk('public')->exists($filePath)) {
+            abort(404, 'Document file not found in storage.');
+        }
+
+        $fileName = basename($filePath);
+        $friendlyName = str_replace('_', ' ', ucfirst($field)) . '_' . $document->person_name . '_' . $fileName;
+
+        return Storage::disk('public')->download($filePath, $friendlyName);
     }
 }

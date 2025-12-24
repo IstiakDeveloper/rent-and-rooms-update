@@ -15,7 +15,9 @@ class Payment extends Model
         'transaction_id',
         'booking_payment_id',
         'payment_type',
-        'status'
+        'status',
+        'user_id',
+        'reference_number'
     ];
 
     /**
@@ -32,8 +34,14 @@ class Payment extends Model
     {
         return $this->belongsTo(Booking::class);
     }
+
     public function bookingPayment()
     {
         return $this->belongsTo(BookingPayment::class);
+    }
+
+    public function user()
+    {
+        return $this->belongsTo(User::class);
     }
 }

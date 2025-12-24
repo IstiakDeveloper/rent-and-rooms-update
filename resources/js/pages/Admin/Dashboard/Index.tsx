@@ -101,12 +101,17 @@ export default function Index(props: DashboardProps) {
         }).format(amount);
     };
 
-    const formatDate = (dateString: string) => {
-        return new Intl.DateTimeFormat('en-GB', {
-            year: 'numeric',
-            month: 'short',
-            day: 'numeric',
-        }).format(new Date(dateString));
+    const formatDate = (dateString: string | null) => {
+        if (!dateString) return 'N/A';
+        try {
+            return new Intl.DateTimeFormat('en-GB', {
+                year: 'numeric',
+                month: 'short',
+                day: 'numeric',
+            }).format(new Date(dateString));
+        } catch (error) {
+            return 'Invalid Date';
+        }
     };
 
     const getStatusColor = (status: string) => {

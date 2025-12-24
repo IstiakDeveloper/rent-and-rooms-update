@@ -40,6 +40,7 @@ class RegisterController extends Controller
             'type' => 'required|string|in:user,partner',
             'address' => 'nullable|string|max:500',
             'terms_accepted' => 'required|boolean|accepted',
+            'intended_url' => 'nullable|string|url',
         ]);
 
         $user = User::create([
@@ -60,11 +61,15 @@ class RegisterController extends Controller
 
         Auth::login($user);
 
+        // Get the intended URL or use referer
+        $intendedUrl = $request->input('intended_url') ?? $request->headers->get('referer') ?? route('home');
+
         // Return JSON response for AJAX requests (modal)
         if ($request->expectsJson()) {
             return response()->json([
                 'success' => true,
                 'message' => 'Registration successful.',
+                'redirect_url' => $intendedUrl,
                 'user' => [
                     'name' => $user->name,
                     'email' => $user->email,
@@ -73,11 +78,7 @@ class RegisterController extends Controller
             ]);
         }
 
-        // Redirect based on user role for regular form submissions
-        if ($request->type === 'partner') {
-            return redirect()->route('home')->with('message', 'Partner registration successful! Welcome to RentAndRoom.');
-        }
-
-        return redirect()->route('home')->with('message', 'Registration successful! Welcome to RentAndRoom.');
+        // Redirect back to the intended URL with success message
+        return redirect($intendedUrl)->with('success', 'Registration successful! Welcome to RentAndRoom.');
     }
 }

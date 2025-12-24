@@ -24,7 +24,8 @@ use Illuminate\Support\Facades\Storage;
 use Livewire\Component;
 use Livewire\WithFileUploads;
 use Illuminate\Support\Str;
-use SendGrid\Mail\Mail as SendGridMail;
+use Illuminate\Support\Facades\Mail;
+use App\Mail\InvoiceMail;
 
 
 class UserViewComponent extends Component
@@ -988,48 +989,19 @@ public function deletePartnerDocument(User $user, Package $package, $type)
             $invoiceData = $this->prepareInvoiceData($booking);
             // dd('Invoice Data:', $invoiceData);
 
-            // Debug Step 3: Check PDF generation
+            // Generate PDF
             $pdf = app('dompdf.wrapper');
             $pdf->loadView('livewire.admin.invoice-template', $invoiceData);
             $pdfContent = $pdf->output();
-            // dd('PDF Generated Successfully');
 
-            // Debug Step 4: Check email setup
-            $email = new SendGridMail();
-            $email->setFrom("rentandrooms@gmail.com", "Rent and Rooms");
-            $email->setSubject("Your Invoice from Rent and Rooms - Booking #{$booking->id}");
-            $email->addTo($booking->user->email, $booking->user->name);
+            // Generate invoice number
+            $invoiceNumber = 'INV-' . date('Y') . '-' . str_pad($booking->id, 4, '0', STR_PAD_LEFT);
 
-            // Debug Step 5: Check email content
-            $emailContent = $this->getInvoiceEmailContent($booking);
-            // dd('Email Content:', $emailContent);
+            // Send email using Laravel Mail with Hostinger SMTP
+            Mail::to($booking->user->email)
+                ->send(new InvoiceMail($booking, $invoiceNumber, $pdfContent));
 
-            $email->addContent("text/html", $emailContent);
-
-            // Debug Step 6: Check attachment
-            $attachment = base64_encode($pdfContent);
-            $email->addAttachment(
-                $attachment,
-                'application/pdf',
-                "invoice-{$booking->id}.pdf",
-                'attachment'
-            );
-            // dd('Email Prepared with Attachment');
-
-            // Debug Step 7: Check SendGrid setup
-            $sendgrid = new \SendGrid(env('SENDGRID_API_KEY'));
-            // dd('SendGrid API Key:', env('SENDGRID_API_KEY'));
-
-            // Debug Step 8: Check response
-            $response = $sendgrid->send($email);
-
-
-            // Check response status code
-            if ($response->statusCode() === 202 || $response->statusCode() === 200) {
-                flash()->success('Invoice has been successfully emailed to ' . $booking->user->email);
-            } else {
-                flash()->error('Failed to send email. Status code: ' . $response->statusCode());
-            }
+            flash()->success('Invoice has been successfully emailed to ' . $booking->user->email);
         } catch (\Exception $e) {
             dd([
                 'Error Message' => $e->getMessage(),

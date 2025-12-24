@@ -8,5 +8,8 @@ use Illuminate\Database\Eloquent\Model;
 class TermsAndPrivacy extends Model
 {
     use HasFactory;
+
+    protected $table = 'terms_and_privacy';
+
     protected $fillable = ['terms_title', 'terms_link', 'privacy_title', 'privacy_link', 'rights_reserves_text'];
 }

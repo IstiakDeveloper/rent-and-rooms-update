@@ -1,6 +1,6 @@
 import React, { useState, FormEvent } from 'react';
-import { Head, Link, useForm } from '@inertiajs/react';
-import { Eye, EyeOff, Mail, Lock, ArrowRight, AlertCircle } from 'lucide-react';
+import { Head, Link, useForm, usePage } from '@inertiajs/react';
+import { Eye, EyeOff, Mail, Lock, ArrowRight, AlertCircle, CheckCircle } from 'lucide-react';
 import { login as loginRoute, register as registerRoute } from '@/routes';
 
 interface LoginForm {
@@ -9,8 +9,13 @@ interface LoginForm {
     remember: boolean;
 }
 
+interface PageProps {
+    status?: string;
+}
+
 export default function Login() {
     const [showPassword, setShowPassword] = useState(false);
+    const { status } = usePage<PageProps>().props;
 
     const { data, setData, post, processing, errors, reset } = useForm<LoginForm>({
         email: '',
@@ -46,6 +51,22 @@ export default function Login() {
                                 Sign in to your account to continue
                             </p>
                         </div>
+
+                        {/* Success Message */}
+                        {status && (
+                            <div className="bg-gradient-to-r from-green-50 to-emerald-50 border-2 border-green-200 rounded-xl p-4 animate-in slide-in-from-top duration-300">
+                                <div className="flex items-center gap-3">
+                                    <div className="bg-green-100 rounded-full p-1.5 flex-shrink-0">
+                                        <CheckCircle className="h-5 w-5 text-green-600" />
+                                    </div>
+                                    <div className="flex-1">
+                                        <p className="text-sm font-medium text-green-800">
+                                            {status}
+                                        </p>
+                                    </div>
+                                </div>
+                            </div>
+                        )}
 
                         {/* Login Form */}
                         <form className="mt-8 space-y-6" onSubmit={submit}>

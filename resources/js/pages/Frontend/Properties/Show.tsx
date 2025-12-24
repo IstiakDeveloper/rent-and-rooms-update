@@ -571,7 +571,7 @@ export default function PropertiesShow({
 
                 {/* Back Button */}
                 <div className="bg-white border-b border-gray-200">
-                    <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-4">
+                    <div className="max-w-[1920px] mx-auto px-4 sm:px-6 lg:px-8 py-4">
                         <button
                             onClick={() => window.history.back()}
                             className="inline-flex items-center gap-2 text-sm font-medium text-gray-600 hover:text-gray-900 transition-colors"
@@ -585,7 +585,7 @@ export default function PropertiesShow({
                 {/* Image Gallery */}
                 {images.length > 0 && (
                     <section className="bg-white">
-                        <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-6">
+                        <div className="max-w-[1920px] mx-auto px-4 sm:px-6 lg:px-8 py-6">
                             <div className="relative rounded-2xl overflow-hidden bg-linear-to-br from-gray-100 to-gray-200" style={{ height: '500px' }}>
                                 <img
                                     src={images[currentImageIndex]}
@@ -645,7 +645,7 @@ export default function PropertiesShow({
                 {/* Video Section */}
                 {videoId && (
                     <section className="bg-white py-6">
-                        <div className="max-w-5xl mx-auto px-4 sm:px-6 lg:px-8">
+                        <div className="max-w-[1400px] mx-auto px-4 sm:px-6 lg:px-8">
                             <div className="relative rounded-2xl overflow-hidden" style={{ paddingBottom: '56.25%' }}>
                                 <iframe
                                     src={`https://www.youtube.com/embed/${videoId}`}
@@ -661,7 +661,7 @@ export default function PropertiesShow({
 
                 {/* Main Content */}
                 <section className="py-8 bg-gray-50">
-                    <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
+                    <div className="max-w-[1920px] mx-auto px-4 sm:px-6 lg:px-8">
                         <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
                             {/* Left Column - Property Details */}
                             <div className="lg:col-span-2 space-y-6">

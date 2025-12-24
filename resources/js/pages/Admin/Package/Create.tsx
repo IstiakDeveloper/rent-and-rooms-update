@@ -48,6 +48,7 @@ interface RoomPrice {
     fixed_price: number;
     discount_price: number | null;
     booking_price: number;
+    rent_advance_price: number;
 }
 
 interface Room {
@@ -76,9 +77,10 @@ interface Props {
     properties: Property[];
     maintains: Maintain[];
     amenities: Amenity[];
+    documentError?: string | null;
 }
 
-export default function Create({ countries, cities: allCities, areas: allAreas, properties, maintains, amenities }: Props) {
+export default function Create({ countries, cities: allCities, areas: allAreas, properties, maintains, amenities, documentError }: Props) {
     const [cities, setCities] = useState<City[]>([]);
     const [areas, setAreas] = useState<Area[]>([]);
     const [photoPreview, setPhotoPreview] = useState<string[]>([]);
@@ -100,14 +102,14 @@ export default function Create({ countries, cities: allCities, areas: allAreas, 
         details: '',
         video_link: '',
         entire_property_prices: [
-            { type: '', fixed_price: 0, discount_price: null, booking_price: 0 }
+            { type: '', fixed_price: 0, discount_price: null, booking_price: 0, rent_advance_price: 0 }
         ] as RoomPrice[],
         rooms: [
             {
                 name: '',
                 number_of_beds: 1,
                 number_of_bathrooms: 0,
-                prices: [{ type: '', fixed_price: 0, discount_price: null, booking_price: 0 }],
+                prices: [{ type: '', fixed_price: 0, discount_price: null, booking_price: 0, rent_advance_price: 0 }],
             },
         ] as Room[],
         freeMaintains: [] as number[],
@@ -148,7 +150,7 @@ export default function Create({ countries, cities: allCities, areas: allAreas, 
                 name: '',
                 number_of_beds: 1,
                 number_of_bathrooms: 0,
-                prices: [{ type: '', fixed_price: 0, discount_price: null, booking_price: 0 }],
+                prices: [{ type: '', fixed_price: 0, discount_price: null, booking_price: 0, rent_advance_price: 0 }],
             },
         ]);
     };
@@ -170,7 +172,7 @@ export default function Create({ countries, cities: allCities, areas: allAreas, 
     const addPrice = (roomIndex: number) => {
         if (data.rooms[roomIndex].prices.length < 3) {
             const newRooms = [...data.rooms];
-            newRooms[roomIndex].prices.push({ type: '', fixed_price: 0, discount_price: null, booking_price: 0 });
+            newRooms[roomIndex].prices.push({ type: '', fixed_price: 0, discount_price: null, booking_price: 0, rent_advance_price: 0 });
             setData('rooms', newRooms);
         }
     };
@@ -194,7 +196,7 @@ export default function Create({ countries, cities: allCities, areas: allAreas, 
         if (data.entire_property_prices.length < 3) {
             setData('entire_property_prices', [
                 ...data.entire_property_prices,
-                { type: '', fixed_price: 0, discount_price: null, booking_price: 0 }
+                { type: '', fixed_price: 0, discount_price: null, booking_price: 0, rent_advance_price: 0 }
             ]);
         }
     };
@@ -287,7 +289,91 @@ export default function Create({ countries, cities: allCities, areas: allAreas, 
     // Form Submission
     const handleSubmit = (e: React.FormEvent) => {
         e.preventDefault();
-        post(packageRoutes.store().url, {
+
+        // Create FormData manually to have better control
+        const formData = new FormData();
+
+        // Add all basic fields
+        formData.append('is_entire_property', data.is_entire_property ? '1' : '0');
+        formData.append('country_id', data.country_id);
+        formData.append('city_id', data.city_id);
+        formData.append('area_id', data.area_id);
+        formData.append('property_id', data.property_id);
+        formData.append('name', data.name);
+        formData.append('address', data.address);
+        if (data.map_link) formData.append('map_link', data.map_link);
+        formData.append('expiration_date', data.expiration_date);
+        formData.append('number_of_kitchens', data.number_of_kitchens.toString());
+        formData.append('number_of_rooms', data.number_of_rooms.toString());
+        formData.append('common_bathrooms', data.common_bathrooms.toString());
+        formData.append('seating', data.seating.toString());
+        if (data.details) formData.append('details', data.details);
+        if (data.video_link) formData.append('video_link', data.video_link);
+
+        // Add conditional data based on property type
+        if (data.is_entire_property) {
+            // Add entire property prices
+            data.entire_property_prices.forEach((price, index) => {
+                formData.append(`entire_property_prices[${index}][type]`, price.type);
+                formData.append(`entire_property_prices[${index}][fixed_price]`, price.fixed_price.toString());
+                if (price.discount_price) formData.append(`entire_property_prices[${index}][discount_price]`, price.discount_price.toString());
+                formData.append(`entire_property_prices[${index}][booking_price]`, price.booking_price.toString());
+            });
+        } else {
+            // Add rooms data
+            data.rooms.forEach((room, roomIndex) => {
+                formData.append(`rooms[${roomIndex}][name]`, room.name);
+                formData.append(`rooms[${roomIndex}][number_of_beds]`, room.number_of_beds.toString());
+                formData.append(`rooms[${roomIndex}][number_of_bathrooms]`, room.number_of_bathrooms.toString());
+
+                room.prices.forEach((price, priceIndex) => {
+                    formData.append(`rooms[${roomIndex}][prices][${priceIndex}][type]`, price.type);
+                    formData.append(`rooms[${roomIndex}][prices][${priceIndex}][fixed_price]`, price.fixed_price.toString());
+                    if (price.discount_price) formData.append(`rooms[${roomIndex}][prices][${priceIndex}][discount_price]`, price.discount_price.toString());
+                    formData.append(`rooms[${roomIndex}][prices][${priceIndex}][booking_price]`, price.booking_price.toString());
+                });
+            });
+        }
+
+        // Add services
+        data.freeMaintains.forEach((id, index) => {
+            formData.append(`freeMaintains[${index}]`, id.toString());
+        });
+
+        data.freeAmenities.forEach((id, index) => {
+            formData.append(`freeAmenities[${index}]`, id.toString());
+        });
+
+        data.paidMaintains.forEach((service, index) => {
+            if (service.maintain_id) {
+                formData.append(`paidMaintains[${index}][maintain_id]`, service.maintain_id.toString());
+                formData.append(`paidMaintains[${index}][price]`, service.price.toString());
+            }
+        });
+
+        data.paidAmenities.forEach((service, index) => {
+            if (service.amenity_id) {
+                formData.append(`paidAmenities[${index}][amenity_id]`, service.amenity_id.toString());
+                formData.append(`paidAmenities[${index}][price]`, service.price.toString());
+            }
+        });
+
+        // Add instructions
+        data.instructions.forEach((instruction, index) => {
+            if (instruction.title && instruction.description) {
+                formData.append(`instructions[${index}][title]`, instruction.title);
+                formData.append(`instructions[${index}][description]`, instruction.description);
+                formData.append(`instructions[${index}][order]`, instruction.order.toString());
+            }
+        });
+
+        // Add photos
+        data.photos.forEach((photo) => {
+            formData.append('photos[]', photo);
+        });
+
+        // Submit with manual FormData
+        router.post(packageRoutes.store().url, formData as any, {
             forceFormData: true,
         });
     };
@@ -313,6 +399,37 @@ export default function Create({ countries, cities: allCities, areas: allAreas, 
                     </button>
                 </div>
 
+                {/* Document Error Warning - Blocking */}
+                {documentError && (
+                    <div className="mb-6 bg-red-50 border-2 border-red-500 rounded-lg p-6">
+                        <div className="flex items-start gap-4">
+                            <div className="shrink-0">
+                                <div className="w-12 h-12 bg-red-100 rounded-full flex items-center justify-center">
+                                    <AlertCircle className="w-7 h-7 text-red-600" />
+                                </div>
+                            </div>
+                            <div className="flex-1">
+                                <h3 className="text-lg font-bold text-red-900 mb-2">
+                                    Partner Documents Required
+                                </h3>
+                                <p className="text-red-800 mb-4 whitespace-pre-line">
+                                    {documentError}
+                                </p>
+                                <a
+                                    href="/admin/profile"
+                                    className="inline-flex items-center gap-2 px-6 py-3 bg-red-600 text-white font-semibold rounded-lg hover:bg-red-700 transition-colors"
+                                >
+                                    <Upload className="w-5 h-5" />
+                                    Go to Profile Page to Upload Documents
+                                </a>
+                                <p className="text-sm text-red-700 mt-3">
+                                    You cannot create a package until all required documents are uploaded and valid.
+                                </p>
+                            </div>
+                        </div>
+                    </div>
+                )}
+
                 {/* Error Display */}
                 {Object.keys(errors).length > 0 && (
                     <div className="mb-6 bg-red-50 border border-red-200 rounded-lg p-4">
@@ -323,14 +440,52 @@ export default function Create({ countries, cities: allCities, areas: allAreas, 
                                     Please fix the following errors:
                                 </h3>
                                 <ul className="list-disc list-inside text-sm text-red-700 space-y-1">
-                                    {Object.values(errors).map((error, index) => (
-                                        <li key={index}>{error}</li>
+                                    {Object.entries(errors).map(([key, error], index) => (
+                                        <li key={index}>
+                                            {error}
+                                            {key === 'documents' && (
+                                                <div className="mt-2">
+                                                    <a
+                                                        href="/admin/profile"
+                                                        className="inline-flex items-center gap-1 text-blue-600 hover:text-blue-800 font-medium underline"
+                                                    >
+                                                        Go to Profile Page to Upload Documents →
+                                                    </a>
+                                                </div>
+                                            )}
+                                        </li>
                                     ))}
                                 </ul>
                             </div>
                         </div>
                     </div>
                 )}
+
+                {/* Form with conditional blocking */}
+                <div className="relative">
+                    {/* Blocking Overlay */}
+                    {documentError && (
+                        <div className="absolute inset-0 bg-gray-900/50 backdrop-blur-sm z-10 rounded-lg flex items-center justify-center">
+                            <div className="bg-white rounded-lg p-8 max-w-md mx-4 text-center shadow-2xl">
+                                <div className="w-16 h-16 bg-red-100 rounded-full flex items-center justify-center mx-auto mb-4">
+                                    <AlertCircle className="w-10 h-10 text-red-600" />
+                                </div>
+                                <h3 className="text-xl font-bold text-gray-900 mb-2">
+                                    Form Blocked
+                                </h3>
+                                <p className="text-gray-600 mb-6">
+                                    Please upload all required documents before creating a package.
+                                </p>
+                                <a
+                                    href="/admin/profile"
+                                    className="inline-flex items-center gap-2 px-6 py-3 bg-blue-600 text-white font-semibold rounded-lg hover:bg-blue-700 transition-colors"
+                                >
+                                    <Upload className="w-5 h-5" />
+                                    Go to Profile
+                                </a>
+                            </div>
+                        </div>
+                    )}
 
                 <form onSubmit={handleSubmit} className="space-y-6">
                     {/* Location & Basic Information */}
@@ -478,17 +633,36 @@ export default function Create({ countries, cities: allCities, areas: allAreas, 
                             </div>
 
                             <div className="md:col-span-4">
-                                <div className="flex items-center gap-3 p-4 bg-blue-50 border border-blue-200 rounded-lg">
-                                    <input
-                                        type="checkbox"
-                                        id="is_entire_property"
-                                        checked={data.is_entire_property}
-                                        onChange={(e) => setData('is_entire_property', e.target.checked)}
-                                        className="w-5 h-5 text-blue-600 border-gray-300 rounded focus:ring-blue-500"
-                                    />
-                                    <label htmlFor="is_entire_property" className="text-sm font-medium text-gray-900 cursor-pointer">
-                                        Rent Entire Property (If checked, no need to add individual rooms)
+                                <div className="p-4 bg-blue-50 border border-blue-200 rounded-lg">
+                                    <label className="block text-sm font-medium text-gray-900 mb-3">
+                                        Property Type <span className="text-red-500">*</span>
                                     </label>
+                                    <div className="flex gap-6">
+                                        <label className="flex items-center cursor-pointer">
+                                            <input
+                                                type="radio"
+                                                name="property_type"
+                                                checked={!data.is_entire_property}
+                                                onChange={() => setData('is_entire_property', false)}
+                                                className="w-4 h-4 text-blue-600 border-gray-300 focus:ring-blue-500"
+                                            />
+                                            <span className="ml-2 text-sm font-medium text-gray-900">
+                                                Room Wise (Individual Rooms)
+                                            </span>
+                                        </label>
+                                        <label className="flex items-center cursor-pointer">
+                                            <input
+                                                type="radio"
+                                                name="property_type"
+                                                checked={data.is_entire_property}
+                                                onChange={() => setData('is_entire_property', true)}
+                                                className="w-4 h-4 text-blue-600 border-gray-300 focus:ring-blue-500"
+                                            />
+                                            <span className="ml-2 text-sm font-medium text-gray-900">
+                                                Entire Property (Rent Full Property)
+                                            </span>
+                                        </label>
+                                    </div>
                                 </div>
                             </div>
                         </div>
@@ -683,6 +857,24 @@ export default function Create({ countries, cities: allCities, areas: allAreas, 
                                                 />
                                             </div>
                                         </div>
+
+                                        <div className="mt-4">
+                                            <div>
+                                                <label className="block text-sm font-medium text-gray-700 mb-2">
+                                                    Rent Advance Price (£) <span className="text-red-500">*</span>
+                                                </label>
+                                                <input
+                                                    type="number"
+                                                    value={price.rent_advance_price}
+                                                    onChange={(e) => updateEntirePropertyPrice(index, 'rent_advance_price', Number(e.target.value))}
+                                                    min="0"
+                                                    step="0.01"
+                                                    placeholder="0.00"
+                                                    className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+                                                />
+                                                <p className="text-xs text-gray-500 mt-1">Security deposit amount (refundable)</p>
+                                            </div>
+                                        </div>
                                     </div>
                                 ))}
                             </div>
@@ -871,6 +1063,27 @@ export default function Create({ countries, cities: allCities, areas: allAreas, 
                                                                 </button>
                                                             )}
                                                         </div>
+                                                    </div>
+
+                                                    <div className="mt-3 bg-gray-50 rounded-lg p-3">
+                                                        <label className="block text-xs font-medium text-gray-700 mb-1">
+                                                            Rent Advance Price <span className="text-red-500">*</span>
+                                                        </label>
+                                                        <div className="flex">
+                                                            <span className="inline-flex items-center px-3 text-sm bg-gray-200 border border-r-0 border-gray-300 rounded-l-lg">
+                                                                £
+                                                            </span>
+                                                            <input
+                                                                type="number"
+                                                                value={price.rent_advance_price}
+                                                                onChange={(e) => updatePrice(roomIndex, priceIndex, 'rent_advance_price', Number(e.target.value))}
+                                                                step="0.01"
+                                                                min="0"
+                                                                placeholder="0.00"
+                                                                className="w-full px-3 py-2 text-sm border border-gray-300 rounded-r-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+                                                            />
+                                                        </div>
+                                                        <p className="text-xs text-gray-500 mt-1">Security deposit amount (refundable)</p>
                                                     </div>
                                                 </div>
                                             ))}
@@ -1173,13 +1386,14 @@ export default function Create({ countries, cities: allCities, areas: allAreas, 
                         </button>
                         <button
                             type="submit"
-                            disabled={processing}
+                            disabled={processing || !!documentError}
                             className="px-6 py-3 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
                         >
                             {processing ? 'Creating...' : 'Create Package'}
                         </button>
                     </div>
                 </form>
+                </div>
             </div>
         </AdminLayout>
     );

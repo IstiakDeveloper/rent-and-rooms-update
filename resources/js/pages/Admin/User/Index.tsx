@@ -1,6 +1,6 @@
-import React, { useState } from 'react';
-import { Head, Link, useForm, router } from '@inertiajs/react';
-import { Search, Eye, Trash2, Plus, UserPlus, X, Mail } from 'lucide-react';
+import React, { useState, useEffect } from 'react';
+import { Head, Link, useForm, router, usePage } from '@inertiajs/react';
+import { Search, Eye, Trash2, Plus, UserPlus, X, Mail, Edit } from 'lucide-react';
 import AdminLayout from '@/layouts/AdminLayout';
 
 interface Role {
@@ -51,17 +51,32 @@ interface UsersProps {
     roles: Role[];
     filters?: {
         search?: string;
-        stay_status?: string;
+        role?: string;
+        has_booking?: string;
     };
 }
 
 export default function Index({ users, roles, filters = {} }: UsersProps) {
+    const { flash } = usePage().props as any;
     const [searchTerm, setSearchTerm] = useState(filters.search || '');
-    const [stayStatus, setStayStatus] = useState(filters.stay_status || '');
+    const [roleFilter, setRoleFilter] = useState(filters.role || '');
+    const [hasBooking, setHasBooking] = useState(filters.has_booking || '');
     const [isCreateModalOpen, setIsCreateModalOpen] = useState(false);
     const [isMessageModalOpen, setIsMessageModalOpen] = useState(false);
     const [selectedUserId, setSelectedUserId] = useState<number | null>(null);
     const [messages, setMessages] = useState<Message[]>([]);
+    const [flashMessage, setFlashMessage] = useState<{ type: 'success' | 'error'; message: string } | null>(null);
+
+    // Handle flash messages
+    useEffect(() => {
+        if (flash?.success) {
+            setFlashMessage({ type: 'success', message: flash.success });
+            setTimeout(() => setFlashMessage(null), 5000);
+        } else if (flash?.error) {
+            setFlashMessage({ type: 'error', message: flash.error });
+            setTimeout(() => setFlashMessage(null), 5000);
+        }
+    }, [flash]);
 
     // Handle ESC key to close modals
     React.useEffect(() => {
@@ -91,7 +106,8 @@ export default function Index({ users, roles, filters = {} }: UsersProps) {
     const handleSearch = () => {
         router.get('/admin/users', {
             search: searchTerm,
-            stay_status: stayStatus,
+            role: roleFilter,
+            has_booking: hasBooking,
             page: 1 // Reset to first page when searching
         }, {
             preserveState: true,
@@ -110,12 +126,19 @@ export default function Index({ users, roles, filters = {} }: UsersProps) {
         return () => clearTimeout(delayedSearch);
     }, [searchTerm]);
 
-    // Auto search when stayStatus changes (like Livewire updatedStayStatus)
+    // Auto search when roleFilter changes
     React.useEffect(() => {
-        if (stayStatus !== (filters.stay_status || '')) {
+        if (roleFilter !== (filters.role || '')) {
             handleSearch();
         }
-    }, [stayStatus]);
+    }, [roleFilter]);
+
+    // Auto search when hasBooking changes
+    React.useEffect(() => {
+        if (hasBooking !== (filters.has_booking || '')) {
+            handleSearch();
+        }
+    }, [hasBooking]);
 
     const handleCreateUser = (e: React.FormEvent) => {
         e.preventDefault();
@@ -127,11 +150,16 @@ export default function Index({ users, roles, filters = {} }: UsersProps) {
         });
     };
 
-    const handleDeleteUser = (userId: number) => {
+    const handleDeleteUser = (userId: number, hasBookings: boolean) => {
+        if (hasBookings) {
+            setFlashMessage({ type: 'error', message: 'Cannot delete user with active bookings. Please delete all bookings first.' });
+            return;
+        }
+
         if (confirm('Are you sure you want to delete this user?')) {
             router.delete(`/admin/users/${userId}`, {
                 preserveScroll: true,
-                preserveState: true,
+                preserveState: false,
             });
         }
     };
@@ -177,9 +205,46 @@ export default function Index({ users, roles, filters = {} }: UsersProps) {
         }
     };
 
+    // Convert "User" role to "Guest" for display only
+    const getDisplayRole = (roleName: string) => {
+        return roleName === 'User' ? 'Guest' : roleName;
+    };
+
     return (
         <AdminLayout>
             <Head title="Users Management" />
+
+            {/* Flash Messages */}
+            {flashMessage && (
+                <div className={`fixed top-4 right-4 z-50 max-w-md w-full ${flashMessage.type === 'success' ? 'bg-green-50 border-green-500' : 'bg-red-50 border-red-500'} border-l-4 p-4 rounded-lg shadow-lg animate-slide-in`}>
+                    <div className="flex items-center justify-between">
+                        <div className="flex items-center">
+                            <div className={`flex-shrink-0 ${flashMessage.type === 'success' ? 'text-green-600' : 'text-red-600'}`}>
+                                {flashMessage.type === 'success' ? (
+                                    <svg className="h-5 w-5" fill="currentColor" viewBox="0 0 20 20">
+                                        <path fillRule="evenodd" d="M10 18a8 8 0 100-16 8 8 0 000 16zm3.707-9.293a1 1 0 00-1.414-1.414L9 10.586 7.707 9.293a1 1 0 00-1.414 1.414l2 2a1 1 0 001.414 0l4-4z" clipRule="evenodd" />
+                                    </svg>
+                                ) : (
+                                    <svg className="h-5 w-5" fill="currentColor" viewBox="0 0 20 20">
+                                        <path fillRule="evenodd" d="M10 18a8 8 0 100-16 8 8 0 000 16zM8.707 7.293a1 1 0 00-1.414 1.414L8.586 10l-1.293 1.293a1 1 0 101.414 1.414L10 11.414l1.293 1.293a1 1 0 001.414-1.414L11.414 10l1.293-1.293a1 1 0 00-1.414-1.414L10 8.586 8.707 7.293z" clipRule="evenodd" />
+                                    </svg>
+                                )}
+                            </div>
+                            <div className="ml-3">
+                                <p className={`text-sm font-medium ${flashMessage.type === 'success' ? 'text-green-800' : 'text-red-800'}`}>
+                                    {flashMessage.message}
+                                </p>
+                            </div>
+                        </div>
+                        <button
+                            onClick={() => setFlashMessage(null)}
+                            className={`ml-4 inline-flex ${flashMessage.type === 'success' ? 'text-green-600 hover:text-green-800' : 'text-red-600 hover:text-red-800'}`}
+                        >
+                            <X className="h-5 w-5" />
+                        </button>
+                    </div>
+                </div>
+            )}
 
             <div className="space-y-6">
                 {/* Header */}
@@ -205,23 +270,9 @@ export default function Index({ users, roles, filters = {} }: UsersProps) {
 
                 {/* Search and Filters */}
                 <div className="bg-white rounded-2xl border border-gray-200 p-8 shadow-lg shadow-gray-100">
-                    <div className="flex flex-col lg:flex-row gap-6 items-end">
-                        {/* User Status Filter */}
-                        <div className="flex-none">
-                            <label className="block text-sm font-semibold text-gray-700 mb-3">User Status</label>
-                            <select
-                                value={stayStatus}
-                                onChange={(e) => setStayStatus(e.target.value)}
-                                className="block w-48 px-4 py-3 border border-gray-300 rounded-xl shadow-sm focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500 text-sm font-medium bg-white transition-all duration-200"
-                            >
-                                <option value="">All Users</option>
-                                <option value="staying">Currently Staying</option>
-                                <option value="want_to">Want to Stay</option>
-                            </select>
-                        </div>
-
+                    <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6">
                         {/* Search Bar */}
-                        <div className="flex-1">
+                        <div className="lg:col-span-2">
                             <label className="block text-sm font-semibold text-gray-700 mb-3">Search Users</label>
                             <div className="relative">
                                 <div className="absolute inset-y-0 left-0 pl-4 flex items-center pointer-events-none">
@@ -236,6 +287,37 @@ export default function Index({ users, roles, filters = {} }: UsersProps) {
                                     className="block w-full pl-12 pr-4 py-3 border border-gray-300 rounded-xl leading-5 bg-white placeholder-gray-500 focus:outline-none focus:placeholder-gray-400 focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500 text-sm transition-all duration-200"
                                 />
                             </div>
+                        </div>
+
+                        {/* Role Filter */}
+                        <div>
+                            <label className="block text-sm font-semibold text-gray-700 mb-3">Role</label>
+                            <select
+                                value={roleFilter}
+                                onChange={(e) => setRoleFilter(e.target.value)}
+                                className="block w-full px-4 py-3 border border-gray-300 rounded-xl shadow-sm focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500 text-sm font-medium bg-white transition-all duration-200"
+                            >
+                                <option value="">All Roles</option>
+                                {roles.map((role) => (
+                                    <option key={role.id} value={role.name}>
+                                        {getDisplayRole(role.name)}
+                                    </option>
+                                ))}
+                            </select>
+                        </div>
+
+                        {/* Booking Status Filter */}
+                        <div>
+                            <label className="block text-sm font-semibold text-gray-700 mb-3">Booking Status</label>
+                            <select
+                                value={hasBooking}
+                                onChange={(e) => setHasBooking(e.target.value)}
+                                className="block w-full px-4 py-3 border border-gray-300 rounded-xl shadow-sm focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500 text-sm font-medium bg-white transition-all duration-200"
+                            >
+                                <option value="">All Users</option>
+                                <option value="yes">Has Bookings</option>
+                                <option value="no">No Bookings</option>
+                            </select>
                         </div>
                     </div>
                 </div>
@@ -307,7 +389,7 @@ export default function Index({ users, roles, filters = {} }: UsersProps) {
                                                             key={role.id}
                                                             className="inline-flex items-center px-3 py-1 rounded-full text-xs font-medium bg-indigo-100 text-indigo-800"
                                                         >
-                                                            {role.name}
+                                                            {getDisplayRole(role.name)}
                                                         </span>
                                                     ))
                                                 ) : (
@@ -340,6 +422,15 @@ export default function Index({ users, roles, filters = {} }: UsersProps) {
                                                     <Eye className="h-4 w-4" />
                                                 </Link>
 
+                                                {/* Edit User Button */}
+                                                <Link
+                                                    href={`/admin/users/${user.id}/edit`}
+                                                    className="inline-flex items-center p-2 border border-transparent rounded-lg text-indigo-600 bg-indigo-50 hover:bg-indigo-100 hover:text-indigo-700 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-indigo-500 transition-all duration-200 transform hover:scale-105"
+                                                    title="Edit User"
+                                                >
+                                                    <Edit className="h-4 w-4" />
+                                                </Link>
+
                                                 {/* Message Button */}
                                                 <button
                                                     onClick={() => loadMessages(user.id)}
@@ -351,9 +442,14 @@ export default function Index({ users, roles, filters = {} }: UsersProps) {
 
                                                 {/* Delete Button */}
                                                 <button
-                                                    onClick={() => handleDeleteUser(user.id)}
-                                                    className="inline-flex items-center p-2 border border-transparent rounded-lg text-red-600 bg-red-50 hover:bg-red-100 hover:text-red-700 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-red-500 transition-all duration-200 transform hover:scale-105"
-                                                    title="Delete User"
+                                                    onClick={() => handleDeleteUser(user.id, user.bookings.length > 0)}
+                                                    className={`inline-flex items-center p-2 border border-transparent rounded-lg transition-all duration-200 transform hover:scale-105 ${
+                                                        user.bookings.length > 0
+                                                            ? 'text-gray-400 bg-gray-100 cursor-not-allowed'
+                                                            : 'text-red-600 bg-red-50 hover:bg-red-100 hover:text-red-700 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-red-500'
+                                                    }`}
+                                                    title={user.bookings.length > 0 ? 'Cannot delete user with active bookings' : 'Delete User'}
+                                                    disabled={user.bookings.length > 0}
                                                 >
                                                     <Trash2 className="h-4 w-4" />
                                                 </button>
@@ -384,7 +480,7 @@ export default function Index({ users, roles, filters = {} }: UsersProps) {
                                             return link.url ? (
                                                 <Link
                                                     key={index}
-                                                    href={`${link.url}&search=${searchTerm}&stay_status=${stayStatus}`}
+                                                    href={`${link.url}&search=${searchTerm}&role=${roleFilter}&has_booking=${hasBooking}`}
                                                     className="px-4 py-2 text-sm font-medium text-gray-700 bg-white border border-gray-300 rounded-lg hover:bg-gray-50 hover:text-gray-900 transition-all duration-200"
                                                     preserveState
                                                     preserveScroll
@@ -405,7 +501,7 @@ export default function Index({ users, roles, filters = {} }: UsersProps) {
                                             return link.url ? (
                                                 <Link
                                                     key={index}
-                                                    href={`${link.url}&search=${searchTerm}&stay_status=${stayStatus}`}
+                                                    href={`${link.url}&search=${searchTerm}&role=${roleFilter}&has_booking=${hasBooking}`}
                                                     className="px-4 py-2 text-sm font-medium text-gray-700 bg-white border border-gray-300 rounded-lg hover:bg-gray-50 hover:text-gray-900 transition-all duration-200"
                                                     preserveState
                                                     preserveScroll
@@ -426,7 +522,7 @@ export default function Index({ users, roles, filters = {} }: UsersProps) {
                                         return link.url ? (
                                             <Link
                                                 key={index}
-                                                href={`${link.url}&search=${searchTerm}&stay_status=${stayStatus}`}
+                                                href={`${link.url}&search=${searchTerm}&role=${roleFilter}&has_booking=${hasBooking}`}
                                                 className={`px-4 py-2 text-sm font-medium rounded-lg transition-all duration-200 ${
                                                     link.active
                                                         ? 'bg-indigo-600 text-white shadow-lg shadow-indigo-200'
@@ -546,7 +642,7 @@ export default function Index({ users, roles, filters = {} }: UsersProps) {
                                                 <option value="">Select Role</option>
                                                 {roles.map((role) => (
                                                     <option key={role.id} value={role.name}>
-                                                        {role.name}
+                                                        {getDisplayRole(role.name)}
                                                     </option>
                                                 ))}
                                             </select>

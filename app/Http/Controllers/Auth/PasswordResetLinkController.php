@@ -3,6 +3,9 @@
 namespace App\Http\Controllers\Auth;
 
 use App\Http\Controllers\Controller;
+use App\Models\Country;
+use App\Models\Footer;
+use App\Models\Header;
 use Illuminate\Http\RedirectResponse;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Password;
@@ -17,8 +20,27 @@ class PasswordResetLinkController extends Controller
      */
     public function create(): Response
     {
+        $selectedCountry = session('selectedCountry', 1); // Default to United Kingdom
+
+        // Header data
+        $header = Header::first();
+
+        // Footer data
+        $footer = Footer::with([
+            'footerSectionTwo',
+            'footerSectionThree',
+            'footerSectionFour.socialLinks'
+        ])->first();
+
+        // All countries for selector
+        $countries = Country::all();
+
         return Inertia::render('Auth/ForgotPassword', [
             'status' => session('status'),
+            'header' => $header,
+            'footer' => $footer,
+            'countries' => $countries,
+            'selectedCountry' => $selectedCountry,
         ]);
     }
 

@@ -13,19 +13,18 @@ use App\Models\PaymentLink;
 use App\Models\User;
 use App\Models\UserDetail;
 use App\Models\UserDocument;
+use App\Models\PartnerDocument;
 use App\Models\Message;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Storage;
 use Illuminate\Support\Facades\Hash;
 use Illuminate\Support\Facades\Auth;
-use Illuminate\Support\Facades\Log;
 use Illuminate\Support\Facades\Mail;
+use App\Mail\InvoiceMail;
 use Inertia\Inertia;
 use Illuminate\Support\Str;
 use Carbon\Carbon;
-use SendGrid\Mail\Mail as SendGridMail;
-use SendGrid;
 
 class UserController extends Controller
 {
@@ -43,22 +42,28 @@ class UserController extends Controller
         // Search functionality
         if ($request->filled('search')) {
             $searchTerm = $request->get('search');
-            $query->where(function($q) use ($searchTerm) {
+            $query->where(function ($q) use ($searchTerm) {
                 $q->where('name', 'like', '%' . $searchTerm . '%')
-                  ->orWhere('email', 'like', '%' . $searchTerm . '%');
+                    ->orWhere('email', 'like', '%' . $searchTerm . '%');
             });
         }
 
-        // Stay status filter
-        if ($request->filled('stay_status')) {
-            $stayStatus = $request->get('stay_status');
-            $query->whereHas('userDetail', function ($q) use ($stayStatus) {
-                if ($stayStatus === 'staying') {
-                    $q->where('stay_status', 'staying');
-                } elseif ($stayStatus === 'want_to') {
-                    $q->where('stay_status', 'want_to');
-                }
+        // Role filter
+        if ($request->filled('role')) {
+            $roleFilter = $request->get('role');
+            $query->whereHas('roles', function ($q) use ($roleFilter) {
+                $q->where('name', $roleFilter);
             });
+        }
+
+        // Has booking filter
+        if ($request->filled('has_booking')) {
+            $hasBooking = $request->get('has_booking');
+            if ($hasBooking === 'yes') {
+                $query->has('bookings');
+            } elseif ($hasBooking === 'no') {
+                $query->doesntHave('bookings');
+            }
         }
 
         $users = $query->paginate(15);
@@ -69,10 +74,13 @@ class UserController extends Controller
             'roles' => $roles,
             'filters' => [
                 'search' => $request->get('search'),
-                'stay_status' => $request->get('stay_status'),
+                'role' => $request->get('role'),
+                'has_booking' => $request->get('has_booking'),
             ],
         ]);
-    }    public function show(User $user)
+    }
+
+    public function show(User $user)
     {
         $user->load([
             'roles',
@@ -80,9 +88,11 @@ class UserController extends Controller
             'bankDetail',
             'agreementDetail',
             'documents',
+            'partnerDocuments',
+            'partnerDocumentItems',
         ]);
 
-        // Load packages assigned to this user (matching Livewire logic)
+        // Load packages assigned to this user
         $packages = Package::with(['creator', 'assignedPartner', 'assignedBy', 'country', 'city', 'area', 'property', 'documents'])
             ->where(function ($query) use ($user) {
                 $query->where('user_id', $user->id)
@@ -90,39 +100,56 @@ class UserController extends Controller
             })
             ->get();
 
-        // Load payments with booking relationship (matching Livewire structure)
-        $payments = Payment::whereHas('booking', function($query) use ($user) {
+        // Load payments with booking relationship
+        $payments = Payment::whereHas('booking', function ($query) use ($user) {
             $query->where('user_id', $user->id);
         })
-        ->with('booking')
-        ->latest()
-        ->get();
+            ->with('booking')
+            ->latest()
+            ->get();
 
         $paymentLinks = PaymentLink::where('user_id', $user->id)
             ->with('bookingPayment')
             ->latest()
             ->get();
 
-        // Load bookings with all necessary relationships (matching Livewire structure)
+        // Load bookings with all necessary relationships
         $bookings = Booking::where('user_id', $user->id)
             ->with([
                 'package',
-                'bookingPayments' => function($query) {
+                'bookingPayments' => function ($query) {
                     $query->orderBy('due_date', 'asc');
                 },
                 'payments',
+                'bookingRoomPrices.room.prices'
             ])
             ->latest()
             ->get()
-            ->map(function($booking) {
-                // Calculate payment summary (matching Livewire logic)
+            ->map(function ($booking) {
+                // Calculate payment summary
                 $totalPrice = (float) $booking->price + (float) $booking->booking_price;
                 $totalPaid = $booking->payments->where('status', 'Paid')->sum('amount');
                 $remainingBalance = $totalPrice - $totalPaid;
                 $paymentPercentage = $totalPrice > 0 ? ($totalPaid / $totalPrice * 100) : 0;
 
+                // Calculate total rent advance from booking room prices
+                $rentAdvancePrice = 0;
+                if ($booking->bookingRoomPrices) {
+                    foreach ($booking->bookingRoomPrices as $brp) {
+                        if ($brp->room && $brp->room->prices) {
+                            $matchingPrice = $brp->room->prices->firstWhere('type', $brp->price_type);
+                            if ($matchingPrice) {
+                                $rentAdvancePrice += (float) $matchingPrice->rent_advance_price;
+                            }
+                        }
+                    }
+                }
+
                 // Convert to array first
                 $bookingArray = $booking->toArray();
+
+                // Add rent advance price
+                $bookingArray['rent_advance_price'] = $rentAdvancePrice;
 
                 // Add payment summary
                 $bookingArray['payment_summary'] = [
@@ -144,6 +171,8 @@ class UserController extends Controller
             'documents' => $user->documents ?? [],
             'bankDetails' => $user->bankDetail ?? null,
             'agreementDetails' => $user->agreementDetail ?? null,
+            'partnerDocuments' => $user->partnerDocuments ?? null,
+            'partnerDocumentItems' => $user->partnerDocumentItems ?? [],
         ]);
     }
 
@@ -228,7 +257,6 @@ class UserController extends Controller
             'package_price' => 'nullable|numeric|min:0',
             'security_amount' => 'nullable|numeric|min:0',
             'entry_date' => 'nullable|date',
-            'stay_status' => 'required|string',
             'package_id' => 'nullable|exists:packages,id',
         ]);
 
@@ -394,21 +422,23 @@ class UserController extends Controller
             'booking_id' => $booking->id,
             'amount' => $validated['milestone_amount'],
             'payment_date' => now(),
-            'due_date' => now()->addDays(7), // 7 days to pay
+            'due_date' => now()->addDays(7),
             'status' => 'pending',
         ]);
 
         // Create payment link
+        $uniqueId = 'PL-' . strtoupper(Str::random(12));
         $paymentLink = PaymentLink::create([
             'user_id' => $user->id,
+            'booking_id' => $booking->id,
             'booking_payment_id' => $bookingPayment->id,
             'amount' => $validated['milestone_amount'],
-            'link' => 'payment-link-' . uniqid(),
+            'unique_id' => $uniqueId,
             'status' => 'active',
             'expires_at' => now()->addDays(7),
         ]);
 
-        return redirect()->back()->with('success', 'Payment link generated successfully.');
+        return redirect()->back()->with('success', 'Payment link generated successfully. Link: ' . route('payment.link.public', $uniqueId));
     }
 
     public function generateMilestonePaymentLink(Request $request, User $user, BookingPayment $milestone)
@@ -434,16 +464,18 @@ class UserController extends Controller
         }
 
         // Create payment link
+        $uniqueId = 'PL-' . strtoupper(Str::random(12));
         $paymentLink = PaymentLink::create([
             'user_id' => $user->id,
+            'booking_id' => $booking->id,
             'booking_payment_id' => $milestone->id,
             'amount' => $validated['amount'],
-            'link' => 'payment-link-' . uniqid(),
+            'unique_id' => $uniqueId,
             'status' => 'active',
             'expires_at' => now()->addDays(7),
         ]);
 
-        return redirect()->back()->with('success', 'Payment link generated successfully for milestone.');
+        return redirect()->back()->with('success', 'Payment link generated: ' . route('payment.link.public', $uniqueId));
     }
 
     public function store(Request $request)
@@ -481,19 +513,24 @@ class UserController extends Controller
             return redirect()->back()->with('error', "You cannot delete your own account.");
         }
 
-        // Delete associated files and records
-        $fileFields = ['passport', 'nid_or_other', 'payslip', 'student_card'];
-        foreach ($user->documents as $document) {
-            foreach ($fileFields as $field) {
-                if ($document->$field) {
-                    Storage::delete($document->$field);
+        try {
+            // Delete associated files and records
+            $fileFields = ['passport', 'nid_or_other', 'payslip', 'student_card'];
+            foreach ($user->documents as $document) {
+                foreach ($fileFields as $field) {
+                    if ($document->$field) {
+                        Storage::delete($document->$field);
+                    }
                 }
             }
+
+            // This will trigger the model's deleting event which checks for bookings
+            $user->delete();
+
+            return redirect()->back()->with('success', 'User deleted successfully.');
+        } catch (\Exception $e) {
+            return redirect()->back()->with('error', $e->getMessage());
         }
-
-        $user->delete();
-
-        return redirect()->back()->with('success', 'User deleted successfully.');
     }
 
     public function getMessages(User $user)
@@ -505,9 +542,6 @@ class UserController extends Controller
         return response()->json($messages);
     }
 
-    /**
-     * Update payment status for a specific payment (matching Livewire functionality)
-     */
     public function updatePaymentStatus(Request $request, User $user, Payment $payment)
     {
         $validated = $request->validate([
@@ -525,28 +559,31 @@ class UserController extends Controller
                 'paid_at' => $validated['status'] === 'Paid' ? now() : null
             ]);
 
-            // Find corresponding booking payment
-            $bookingPayment = BookingPayment::where('booking_id', $booking->id)
-                ->where('amount', $payment->amount)
-                ->orderBy('due_date', 'asc')
-                ->first();
+            // Get corresponding booking payment directly from the payment
+            $bookingPayment = null;
+
+            if ($payment->booking_payment_id) {
+                $bookingPayment = BookingPayment::find($payment->booking_payment_id);
+            } else {
+                $bookingPayment = BookingPayment::where('booking_id', $booking->id)
+                    ->where('amount', $payment->amount)
+                    ->orderBy('due_date', 'asc')
+                    ->first();
+            }
 
             if ($bookingPayment) {
                 if ($validated['status'] === 'Paid') {
-                    // Update booking payment for paid status
                     $bookingPayment->update([
                         'payment_status' => 'paid',
                         'payment_id' => $payment->id,
                         'paid_at' => now(),
                         'payment_method' => $payment->payment_method,
-                        'transaction_reference' => $payment->transaction_id
+                        'transaction_reference' => $payment->transaction_id ?? $payment->reference_number
                     ]);
 
-                    // Invalidate any existing payment links
                     PaymentLink::where('booking_payment_id', $bookingPayment->id)
                         ->update(['status' => 'completed']);
                 } else {
-                    // For pending status, reset the booking payment
                     $bookingPayment->update([
                         'payment_status' => 'pending',
                         'payment_id' => null,
@@ -555,13 +592,11 @@ class UserController extends Controller
                         'transaction_reference' => null
                     ]);
 
-                    // Invalidate any existing payment links to allow new ones
                     PaymentLink::where('booking_payment_id', $bookingPayment->id)
                         ->where('status', '!=', 'completed')
                         ->update(['status' => 'expired']);
                 }
 
-                // If there was a previous payment, update its status
                 if ($bookingPayment->payment_id && $bookingPayment->payment_id !== $payment->id) {
                     Payment::where('id', $bookingPayment->payment_id)
                         ->update(['status' => 'cancelled']);
@@ -575,7 +610,6 @@ class UserController extends Controller
 
             $statusText = $validated['status'] === 'Paid' ? 'marked as paid' : 'reset to pending';
 
-            // Check if it's an AJAX request
             if ($request->wantsJson() || $request->expectsJson()) {
                 return response()->json([
                     'message' => "Payment successfully {$statusText}!",
@@ -587,13 +621,7 @@ class UserController extends Controller
 
         } catch (\Exception $e) {
             DB::rollBack();
-            Log::error('Payment status update failed', [
-                'payment_id' => $payment->id,
-                'status' => $validated['status'],
-                'error' => $e->getMessage()
-            ]);
 
-            // Check if it's an AJAX request
             if ($request->wantsJson() || $request->expectsJson()) {
                 return response()->json([
                     'message' => 'Failed to update payment status: ' . $e->getMessage()
@@ -604,9 +632,6 @@ class UserController extends Controller
         }
     }
 
-    /**
-     * Update the overall booking status based on payments
-     */
     protected function updateBookingStatus($booking)
     {
         $totalAmount = (float) $booking->price + (float) $booking->booking_price;
@@ -633,9 +658,6 @@ class UserController extends Controller
         ]);
     }
 
-    /**
-     * Generate payment link for milestone (matching Livewire functionality)
-     */
     public function generateMilestonePaymentLinks(Request $request, User $user)
     {
         $validated = $request->validate([
@@ -645,18 +667,15 @@ class UserController extends Controller
         try {
             $booking = Booking::with('payments', 'bookingPayments')->findOrFail($validated['booking_id']);
 
-            // Check if milestone payments exist, if not create them
             if ($booking->bookingPayments()->count() === 0) {
                 $this->createInitialMilestonePayments($booking);
                 $booking->load('bookingPayments');
             }
 
-            // Get all milestones
             $milestones = $booking->bookingPayments()
                 ->orderBy('due_date')
                 ->get()
                 ->map(function ($payment) {
-                    // Get the most recent pending payment link
                     $existingPaymentLink = PaymentLink::where('booking_payment_id', $payment->id)
                         ->where('status', 'pending')
                         ->latest()
@@ -689,13 +708,9 @@ class UserController extends Controller
         }
     }
 
-    /**
-     * Create payment link for specific milestone
-     */
     public function createMilestonePaymentLink(Request $request, User $user, BookingPayment $bookingPayment)
     {
         try {
-            // Prevent creating a link for already paid milestones
             if ($bookingPayment->payment_status === 'paid') {
                 return response()->json([
                     'success' => false,
@@ -703,13 +718,11 @@ class UserController extends Controller
                 ]);
             }
 
-            // Check for existing payment link
             $existingLink = PaymentLink::where('booking_payment_id', $bookingPayment->id)
-                ->where('status', 'pending')
+                ->where('status', 'active')
                 ->first();
 
             if ($existingLink) {
-                // Update existing link
                 $existingLink->update([
                     'amount' => $bookingPayment->amount,
                     'updated_at' => now()
@@ -717,32 +730,24 @@ class UserController extends Controller
 
                 $paymentLink = $existingLink;
             } else {
-                // Create new payment link if none exists
                 $paymentLink = PaymentLink::create([
                     'unique_id' => Str::uuid(),
                     'user_id' => $user->id,
                     'booking_id' => $bookingPayment->booking_id,
                     'booking_payment_id' => $bookingPayment->id,
                     'amount' => $bookingPayment->amount,
-                    'status' => 'pending'
+                    'status' => 'active'
                 ]);
             }
 
             return response()->json([
                 'success' => true,
                 'message' => $existingLink ? 'Payment link updated successfully!' : 'Payment link generated successfully!',
-                'payment_link' => route('admin.payment-links.show', $paymentLink->unique_id),
+                'payment_link' => url('/pay/' . $paymentLink->unique_id),
                 'last_updated' => $paymentLink->updated_at->format('d M Y H:i')
             ]);
 
         } catch (\Exception $e) {
-            Log::error('Error generating milestone payment link', [
-                'user_id' => $user->id,
-                'booking_payment_id' => $bookingPayment->id ?? null,
-                'error' => $e->getMessage(),
-                'trace' => $e->getTraceAsString()
-            ]);
-
             return response()->json([
                 'success' => false,
                 'error' => 'Error managing payment link: ' . $e->getMessage()
@@ -753,38 +758,17 @@ class UserController extends Controller
     private function createInitialMilestonePayments($booking)
     {
         try {
-            // Validate booking data
             if (!$booking->from_date || !$booking->to_date) {
-                Log::error('Booking missing dates', [
-                    'booking_id' => $booking->id,
-                    'from_date' => $booking->from_date,
-                    'to_date' => $booking->to_date
-                ]);
                 throw new \Exception('Booking dates are missing');
             }
 
             if (!$booking->price || $booking->price <= 0) {
-                Log::error('Booking has invalid price', [
-                    'booking_id' => $booking->id,
-                    'price' => $booking->price,
-                    'booking_price' => $booking->booking_price
-                ]);
                 throw new \Exception('Booking price is invalid');
             }
 
             $startDate = Carbon::parse($booking->from_date);
-            $priceType = $booking->price_type ?? 'Month'; // Default to Month if not set
+            $priceType = $booking->price_type ?? 'Month';
 
-            Log::info('Creating milestone payments', [
-                'booking_id' => $booking->id,
-                'price_type' => $priceType,
-                'from_date' => $booking->from_date,
-                'to_date' => $booking->to_date,
-                'price' => $booking->price,
-                'booking_price' => $booking->booking_price
-            ]);
-
-            // Calculate milestones based on price type
             $fromDate = Carbon::parse($booking->from_date);
             $toDate = Carbon::parse($booking->to_date);
 
@@ -795,18 +779,10 @@ class UserController extends Controller
                 default => 1
             };
 
-            // Ensure at least one payment
             $numberOfPayments = max(1, $numberOfPayments);
-
-            Log::info('Calculated payments', [
-                'booking_id' => $booking->id,
-                'number_of_payments' => $numberOfPayments
-            ]);
-
-            // Calculate amount per milestone
             $baseAmount = $booking->price / $numberOfPayments;
 
-            // Create a separate booking fee milestone
+            // Create booking fee milestone
             $booking->bookingPayments()->create([
                 'milestone_type' => 'Booking',
                 'milestone_number' => 0,
@@ -816,6 +792,7 @@ class UserController extends Controller
                 'is_booking_fee' => true
             ]);
 
+            // Create regular payment milestones
             for ($i = 0; $i < $numberOfPayments; $i++) {
                 $dueDate = match ($priceType) {
                     'Month' => $startDate->copy()->addMonths($i),
@@ -834,18 +811,8 @@ class UserController extends Controller
                 ]);
             }
 
-            Log::info('Successfully created milestone payments', [
-                'booking_id' => $booking->id,
-                'total_created' => $numberOfPayments + 1 // +1 for booking fee
-            ]);
-
         } catch (\Exception $e) {
-            Log::error('Error creating milestone payments', [
-                'booking_id' => $booking->id,
-                'error' => $e->getMessage(),
-                'trace' => $e->getTraceAsString()
-            ]);
-            throw $e; // Re-throw so calling method can handle it
+            throw $e;
         }
     }
 
@@ -862,9 +829,6 @@ class UserController extends Controller
         };
     }
 
-    /**
-     * Download invoice for booking
-     */
     public function downloadInvoice(User $user, Booking $booking)
     {
         try {
@@ -872,88 +836,58 @@ class UserController extends Controller
 
             $invoiceData = $this->prepareInvoiceData($booking);
 
-            $pdf = app('dompdf.wrapper');
-            $pdf->loadView('admin.invoice-template', $invoiceData);
+            $pdf = \Barryvdh\DomPDF\Facade\Pdf::loadView('admin.invoice-template', $invoiceData);
+            $pdf->setPaper('A4', 'portrait');
+
+            session()->flash('success', 'Invoice downloaded successfully!');
 
             return $pdf->download("invoice-{$booking->id}.pdf");
 
         } catch (\Exception $e) {
-            Log::error('Download invoice error', [
-                'user_id' => $user->id,
-                'booking_id' => $booking->id,
-                'error' => $e->getMessage()
-            ]);
-            return response()->json(['message' => 'Error generating invoice: ' . $e->getMessage()], 500);
+            return redirect()->back()->with('error', 'Error generating invoice: ' . $e->getMessage());
         }
     }
 
-    /**
-     * Email invoice to user
-     */
     public function emailInvoice(User $user, Booking $booking)
     {
         try {
             $booking->load(['user', 'package', 'payments']);
 
-            // Check if user has email
             if (!$booking->user->email) {
-                return response()->json(['message' => 'Cannot send invoice: User has no email address.'], 400);
+                return redirect()->back()->with('error', 'Cannot send invoice: User has no email address.');
             }
 
             $invoiceData = $this->prepareInvoiceData($booking);
 
-            // Generate PDF
-            $pdf = app('dompdf.wrapper');
-            $pdf->loadView('admin.invoice-template', $invoiceData);
+            $pdf = \Barryvdh\DomPDF\Facade\Pdf::loadView('admin.invoice-template', $invoiceData);
+            $pdf->setPaper('A4', 'portrait');
             $pdfContent = $pdf->output();
 
-            // Send email using Laravel Mail
-            Mail::send('emails.invoice', [
-                'booking' => $booking,
-                'userName' => $booking->user->name,
-                'invoiceNumber' => 'INV-' . date('Y') . '-' . str_pad($booking->id, 4, '0', STR_PAD_LEFT),
-                'totalAmount' => number_format($booking->price + $booking->booking_price, 2),
-                'dueDate' => now()->addDays(7)->format('d/m/Y')
-            ], function ($message) use ($booking, $pdfContent) {
-                $message->from('rentandrooms@gmail.com', 'Rent and Rooms');
-                $message->to($booking->user->email, $booking->user->name);
-                $message->subject("Your Invoice from Rent and Rooms - Booking #{$booking->id}");
-                $message->attachData($pdfContent, "invoice-{$booking->id}.pdf", [
-                    'mime' => 'application/pdf'
-                ]);
-            });
+            $invoiceNumber = 'INV-' . date('Y') . '-' . str_pad($booking->id, 4, '0', STR_PAD_LEFT);
 
-            return response()->json(['message' => 'Invoice has been successfully emailed to ' . $booking->user->email], 200);
+            Mail::to($booking->user->email)
+                ->send(new InvoiceMail($booking, $invoiceNumber, $pdfContent));
+
+            return redirect()->back()->with('success', 'Invoice has been successfully emailed to ' . $booking->user->email);
 
         } catch (\Exception $e) {
-            Log::error('Invoice email error', [
-                'user_id' => $user->id,
-                'booking_id' => $booking->id,
-                'error' => $e->getMessage()
-            ]);
-            return response()->json(['message' => 'Failed to send invoice email. Please try again later.'], 500);
+            return redirect()->back()->with('error', 'Failed to send invoice email. Please try again later.');
         }
     }
 
-    /**
-     * Get milestones for a specific booking (matching frontend functionality)
-     */
     public function getBookingMilestones(User $user, Booking $booking)
     {
         try {
-            // Check if milestone payments exist, if not create them
             if ($booking->bookingPayments()->count() === 0) {
                 $this->createInitialMilestonePayments($booking);
                 $booking->load('bookingPayments');
             }
 
-            // Get all milestones with payment link information
             $milestones = $booking->bookingPayments()
                 ->orderBy('due_date')
                 ->get()
                 ->map(function ($payment) {
                     try {
-                        // Get the most recent pending payment link
                         $existingPaymentLink = PaymentLink::where('booking_payment_id', $payment->id)
                             ->where('status', 'pending')
                             ->latest()
@@ -972,12 +906,6 @@ class UserController extends Controller
                             'last_updated' => $existingPaymentLink ? Carbon::parse($existingPaymentLink->updated_at)->format('d M Y H:i') : null
                         ];
                     } catch (\Exception $e) {
-                        Log::error('Error mapping milestone', [
-                            'payment_id' => $payment->id,
-                            'error' => $e->getMessage(),
-                            'trace' => $e->getTraceAsString()
-                        ]);
-                        // Return basic data if mapping fails
                         return [
                             'id' => $payment->id,
                             'description' => 'Payment #' . $payment->id,
@@ -997,12 +925,6 @@ class UserController extends Controller
             ]);
 
         } catch (\Exception $e) {
-            Log::error('Error fetching booking milestones', [
-                'user_id' => $user->id,
-                'booking_id' => $booking->id,
-                'error' => $e->getMessage(),
-                'trace' => $e->getTraceAsString()
-            ]);
             return response()->json([
                 'error' => 'Failed to fetch milestones',
                 'message' => $e->getMessage()
@@ -1010,9 +932,6 @@ class UserController extends Controller
         }
     }
 
-    /**
-     * Update user basic information (matching frontend functionality)
-     */
     public function updateUserInfo(Request $request, User $user)
     {
         $validated = $request->validate([
@@ -1025,10 +944,6 @@ class UserController extends Controller
             $user->update($validated);
             return response()->json(['message' => 'User information updated successfully']);
         } catch (\Exception $e) {
-            Log::error('Error updating user info', [
-                'user_id' => $user->id,
-                'error' => $e->getMessage()
-            ]);
             return response()->json(['error' => 'Failed to update user information'], 500);
         }
     }
@@ -1037,10 +952,14 @@ class UserController extends Controller
     {
         $invoiceNumber = 'INV-' . date('Y') . '-' . str_pad($booking->id, 4, '0', STR_PAD_LEFT);
 
+        $header = \App\Models\Header::first();
+        $logo = $header ? $header->logo : null;
+
         return [
             'invoice_number' => $invoiceNumber,
             'date' => now()->format('d/m/Y'),
             'due_date' => now()->addDays(7)->format('d/m/Y'),
+            'logo' => $logo,
             'booking' => $booking,
             'customer' => [
                 'name' => $booking->user->name,
@@ -1074,25 +993,6 @@ class UserController extends Controller
         ];
     }
 
-    private function getInvoiceEmailContent($booking)
-    {
-        try {
-            return view('emails.invoice', [
-                'booking' => $booking,
-                'userName' => $booking->user->name,
-                'invoiceNumber' => 'INV-' . date('Y') . '-' . str_pad($booking->id, 4, '0', STR_PAD_LEFT),
-                'totalAmount' => number_format($booking->price + $booking->booking_price, 2),
-                'dueDate' => now()->addDays(7)->format('d/m/Y')
-            ])->render();
-        } catch (\Exception $e) {
-            Log::error('Error rendering invoice email template: ' . $e->getMessage());
-            throw new \Exception('Failed to generate email content');
-        }
-    }
-
-    /**
-     * Update user basic information
-     */
     public function updateUser(Request $request, User $user)
     {
         $validated = $request->validate([
@@ -1106,9 +1006,6 @@ class UserController extends Controller
         return redirect()->back()->with('success', 'User information updated successfully.');
     }
 
-    /**
-     * Update package documents
-     */
     public function updatePackageDocuments(Request $request, User $user, Package $package)
     {
         $request->validate([
@@ -1123,7 +1020,6 @@ class UserController extends Controller
         try {
             DB::beginTransaction();
 
-            // Check if package belongs to user OR is assigned to user
             if ($package->user_id !== $user->id && $package->assigned_to !== $user->id) {
                 throw new \Exception('Package does not belong to this user');
             }
@@ -1157,18 +1053,10 @@ class UserController extends Controller
 
         } catch (\Exception $e) {
             DB::rollBack();
-            Log::error('Error updating package documents', [
-                'user_id' => $user->id,
-                'package_id' => $package->id,
-                'error' => $e->getMessage()
-            ]);
             return redirect()->back()->with('error', 'Error updating documents: ' . $e->getMessage());
         }
     }
 
-    /**
-     * Delete package document
-     */
     public function deletePackageDocument(User $user, Package $package, $type)
     {
         try {
@@ -1196,5 +1084,323 @@ class UserController extends Controller
             DB::rollBack();
             return redirect()->back()->with('error', 'Error deleting document: ' . $e->getMessage());
         }
+    }
+
+    public function updatePartnerDocuments(Request $request, User $user)
+    {
+        try {
+            $validated = $request->validate([
+                'photo_id' => 'nullable|file|mimes:pdf,jpg,jpeg,png|max:10240',
+                'photo_id_expiry' => 'nullable|date',
+                'authorised_letter' => 'nullable|file|mimes:pdf,jpg,jpeg,png|max:10240',
+                'authorised_letter_expiry' => 'nullable|date',
+                'management_agreement' => 'nullable|file|mimes:pdf,jpg,jpeg,png|max:10240',
+                'management_agreement_expiry' => 'nullable|date',
+                'management_maintain_agreement' => 'nullable|file|mimes:pdf,jpg,jpeg,png|max:10240',
+                'management_maintain_agreement_expiry' => 'nullable|date',
+                'franchise_agreement' => 'nullable|file|mimes:pdf,jpg,jpeg,png|max:10240',
+                'franchise_agreement_expiry' => 'nullable|date',
+                'investor_agreement' => 'nullable|file|mimes:pdf,jpg,jpeg,png|max:10240',
+                'investor_agreement_expiry' => 'nullable|date',
+                'hmo_licence' => 'nullable|file|mimes:pdf,jpg,jpeg,png|max:10240',
+                'hmo_licence_expiry' => 'nullable|date',
+                'gas_certificate' => 'nullable|file|mimes:pdf,jpg,jpeg,png|max:10240',
+                'gas_certificate_expiry' => 'nullable|date',
+                'eicr_certificate' => 'nullable|file|mimes:pdf,jpg,jpeg,png|max:10240',
+                'eicr_certificate_expiry' => 'nullable|date',
+                'epc_certificate' => 'nullable|file|mimes:pdf,jpg,jpeg,png|max:10240',
+                'epc_certificate_expiry' => 'nullable|date',
+                'smoke_fire_certificate' => 'nullable|file|mimes:pdf,jpg,jpeg,png|max:10240',
+                'smoke_fire_certificate_expiry' => 'nullable|date',
+                'building_insurance' => 'nullable|file|mimes:pdf,jpg,jpeg,png|max:10240',
+                'building_insurance_expiry' => 'nullable|date',
+                'maintain_report' => 'nullable|file|mimes:pdf,jpg,jpeg,png|max:10240',
+                'maintain_report_expiry' => 'nullable|date',
+                'package_floor_plan' => 'nullable|file|mimes:pdf,jpg,jpeg,png|max:10240',
+                'package_floor_plan_expiry' => 'nullable|date',
+                'authorization_letter' => 'nullable|file|mimes:pdf,jpg,jpeg,png|max:10240',
+                'authorization_letter_expiry' => 'nullable|date',
+            ]);
+
+            $partnerDoc = $user->partnerDocuments ?? new PartnerDocument(['user_id' => $user->id]);
+
+            $updateData = [];
+
+            $fileFields = [
+                'photo_id',
+                'authorised_letter',
+                'management_agreement',
+                'management_maintain_agreement',
+                'franchise_agreement',
+                'investor_agreement',
+                'hmo_licence',
+                'gas_certificate',
+                'eicr_certificate',
+                'epc_certificate',
+                'smoke_fire_certificate',
+                'building_insurance',
+                'maintain_report',
+                'package_floor_plan',
+            ];
+
+            foreach ($fileFields as $field) {
+                if ($request->hasFile($field)) {
+                    if ($partnerDoc->exists && $partnerDoc->$field) {
+                        Storage::delete($partnerDoc->$field);
+                    }
+
+                    $path = $request->file($field)->store('partner_documents', 'public');
+                    $updateData[$field] = $path;
+                }
+
+                $expiryField = $field . '_expiry';
+                if ($request->has($expiryField)) {
+                    $updateData[$expiryField] = $validated[$expiryField];
+                }
+            }
+
+            if ($partnerDoc->exists) {
+                $partnerDoc->update($updateData);
+            } else {
+                $partnerDoc->fill($updateData);
+                $partnerDoc->save();
+            }
+
+            return redirect()->back()->with('success', 'Partner documents updated successfully.');
+        } catch (\Exception $e) {
+            return redirect()->back()->withErrors(['error' => 'Failed to update documents: ' . $e->getMessage()]);
+        }
+    }
+
+    public function deletePartnerDocument(User $user, string $type)
+    {
+        try {
+            $partnerDoc = $user->partnerDocuments;
+
+            if (!$partnerDoc) {
+                return redirect()->back()->withErrors(['error' => 'No documents found.']);
+            }
+
+            $validTypes = [
+                'photo_id',
+                'authorised_letter',
+                'management_agreement',
+                'management_maintain_agreement',
+                'franchise_agreement',
+                'investor_agreement',
+                'hmo_licence',
+                'gas_certificate',
+                'eicr_certificate',
+                'epc_certificate',
+                'smoke_fire_certificate',
+                'building_insurance',
+                'maintain_report',
+                'package_floor_plan',
+            ];
+
+            if (!in_array($type, $validTypes)) {
+                return redirect()->back()->withErrors(['error' => 'Invalid document type.']);
+            }
+
+            if ($partnerDoc->$type) {
+                Storage::delete($partnerDoc->$type);
+            }
+
+            $partnerDoc->update([
+                $type => null,
+                $type . '_expiry' => null,
+            ]);
+
+            return redirect()->back()->with('success', 'Document deleted successfully.');
+        } catch (\Exception $e) {
+            return redirect()->back()->withErrors(['error' => 'Failed to delete document: ' . $e->getMessage()]);
+        }
+    }
+
+    public function downloadPartnerDocument(User $user, string $type)
+    {
+        try {
+            $partnerDoc = $user->partnerDocuments;
+
+            if (!$partnerDoc) {
+                abort(404, 'No documents found.');
+            }
+
+            $validTypes = [
+                'photo_id',
+                'authorised_letter',
+                'management_agreement',
+                'management_maintain_agreement',
+                'franchise_agreement',
+                'investor_agreement',
+                'hmo_licence',
+                'gas_certificate',
+                'eicr_certificate',
+                'epc_certificate',
+                'smoke_fire_certificate',
+                'building_insurance',
+                'maintain_report',
+                'package_floor_plan',
+            ];
+
+            if (!in_array($type, $validTypes)) {
+                abort(400, 'Invalid document type.');
+            }
+
+            $filePath = $partnerDoc->$type;
+
+            if (!$filePath) {
+                abort(404, 'Document not found.');
+            }
+
+            if (!Storage::disk('public')->exists($filePath)) {
+                abort(404, 'Document file not found in storage.');
+            }
+
+            $fileName = basename($filePath);
+            $friendlyName = str_replace('_', ' ', ucfirst($type)) . '_' . $user->name . '_' . $fileName;
+
+            return response()->download(storage_path('app/public/' . $filePath), $friendlyName);
+
+        } catch (\Exception $e) {
+            return redirect()->back()->with('error', 'Failed to download document: ' . $e->getMessage());
+        }
+    }
+
+    // Dynamic Partner Document Methods (New System)
+    public function getPartnerDocumentItems(User $user)
+    {
+        $partnerDocs = $user->partnerDocumentItems()->where('document_type', 'partner')->get();
+        $packageDocs = $user->partnerDocumentItems()->where('document_type', 'package')->get();
+
+        return response()->json([
+            'success' => true,
+            'partner_documents' => $partnerDocs,
+            'package_documents' => $packageDocs,
+        ]);
+    }
+
+    public function addPartnerDocumentItem(Request $request, User $user)
+    {
+        $validated = $request->validate([
+            'package_id' => 'required|exists:packages,id',
+            'document_type' => 'required|in:partner,package',
+            'document_name' => 'required|string|max:255',
+            'file' => 'required|file|mimes:pdf,jpg,jpeg,png|max:10240',
+            'expiry_date' => 'nullable|date',
+            'notes' => 'nullable|string|max:500',
+        ]);
+
+        try {
+            $filePath = $request->file('file')->store('partner_documents', 'public');
+
+            $document = \App\Models\PartnerDocumentItem::create([
+                'user_id' => $user->id,
+                'package_id' => $validated['package_id'],
+                'document_type' => $validated['document_type'],
+                'document_name' => $validated['document_name'],
+                'file_path' => $filePath,
+                'expiry_date' => $validated['expiry_date'] ?? null,
+                'notes' => $validated['notes'] ?? null,
+                'status' => 'active',
+            ]);
+
+            return redirect()->back()->with('success', 'Document added successfully.');
+        } catch (\Exception $e) {
+            \Log::error('Error adding partner document', [
+                'user_id' => $user->id,
+                'error' => $e->getMessage()
+            ]);
+            return redirect()->back()->with('error', 'Failed to add document: ' . $e->getMessage());
+        }
+    }
+
+    public function updatePartnerDocumentItem(Request $request, User $user, \App\Models\PartnerDocumentItem $document)
+    {
+        if ($document->user_id !== $user->id) {
+            return redirect()->back()->with('error', 'Unauthorized access to document');
+        }
+
+        $validated = $request->validate([
+            'document_name' => 'required|string|max:255',
+            'file' => 'nullable|file|mimes:pdf,jpg,jpeg,png|max:10240',
+            'expiry_date' => 'nullable|date',
+            'notes' => 'nullable|string|max:500',
+        ]);
+
+        try {
+            $updateData = [
+                'document_name' => $validated['document_name'],
+                'expiry_date' => $validated['expiry_date'] ?? $document->expiry_date,
+                'notes' => $validated['notes'] ?? $document->notes,
+            ];
+
+            if ($request->hasFile('file')) {
+                if ($document->file_path) {
+                    Storage::delete($document->file_path);
+                }
+                $filePath = $request->file('file')->store('partner_documents', 'public');
+                $updateData['file_path'] = $filePath;
+            }
+
+            $document->update($updateData);
+
+            return redirect()->back()->with('success', 'Document updated successfully.');
+        } catch (\Exception $e) {
+            \Log::error('Error updating partner document', [
+                'user_id' => $user->id,
+                'document_id' => $document->id,
+                'error' => $e->getMessage()
+            ]);
+            return redirect()->back()->with('error', 'Failed to update document: ' . $e->getMessage());
+        }
+    }
+
+    public function deletePartnerDocumentItem(User $user, \App\Models\PartnerDocumentItem $document)
+    {
+        if ($document->user_id !== $user->id) {
+            return redirect()->back()->with('error', 'Unauthorized access to document');
+        }
+
+        try {
+            if ($document->file_path) {
+                Storage::disk('public')->delete($document->file_path);
+            }
+
+            $document->delete();
+
+            return redirect()->back()->with('success', 'Document deleted successfully.');
+        } catch (\Exception $e) {
+            \Log::error('Error deleting partner document', [
+                'user_id' => $user->id,
+                'document_id' => $document->id,
+                'error' => $e->getMessage()
+            ]);
+            return redirect()->back()->with('error', 'Failed to delete document: ' . $e->getMessage());
+        }
+    }
+
+    public function downloadPartnerDocumentItem(User $user, \App\Models\PartnerDocumentItem $document)
+    {
+        if ($document->user_id !== $user->id) {
+            abort(403, 'Unauthorized access to document');
+        }
+
+        if (!$document->file_path) {
+            abort(404, 'Document file not found');
+        }
+
+        if (!Storage::disk('public')->exists($document->file_path)) {
+            \Log::error('Partner document file not found in storage', [
+                'user_id' => $user->id,
+                'document_id' => $document->id,
+                'path' => $document->file_path,
+            ]);
+            abort(404, 'Document file not found in storage');
+        }
+
+        $fileName = $document->document_name . '_' . $user->name . '_' . basename($document->file_path);
+
+        return Storage::disk('public')->download($document->file_path, $fileName);
     }
 }

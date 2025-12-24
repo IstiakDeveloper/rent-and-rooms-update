@@ -29,13 +29,16 @@ class PropertyController extends Controller
     public function create()
     {
         $countries = Country::all();
-        $cities = collect(); // Empty initially
+        // Load UK cities by default (UK ID = 1)
+        $ukCountry = Country::where('name', 'LIKE', '%UK%')->orWhere('name', 'LIKE', '%United Kingdom%')->first();
+        $cities = $ukCountry ? City::where('country_id', $ukCountry->id)->get(['id', 'name']) : collect();
         $propertyTypes = PropertyType::all();
 
         return Inertia::render('Admin/Property/Create', [
             'countries' => $countries,
             'cities' => $cities,
             'propertyTypes' => $propertyTypes,
+            'defaultCountryId' => $ukCountry?->id,
         ]);
     }
 

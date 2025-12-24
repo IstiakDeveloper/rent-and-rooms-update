@@ -63,7 +63,6 @@
                 <h3 style="margin-top: 0;">Invoice Details</h3>
                 <p><strong>Invoice Number:</strong> {{ $invoiceNumber }}</p>
                 <p><strong>Booking Reference:</strong> #{{ $booking->id }}</p>
-                <p><strong>Total Amount:</strong> £{{ $totalAmount }}</p>
                 <p><strong>Due Date:</strong> {{ $dueDate }}</p>
             </div>
 

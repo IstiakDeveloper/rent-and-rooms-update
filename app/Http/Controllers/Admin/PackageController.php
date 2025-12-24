@@ -29,19 +29,19 @@ class PackageController extends Controller
         $isAdmin = $userRoles->contains('Admin');
         $isPartner = $userRoles->contains('Partner');
 
-        $query = Package::with(['creator', 'assignedPartner', 'assignedBy', 'country', 'city', 'area', 'property'])
+        $query = Package::with(['creator', 'assignedPartner', 'assignedAdmin', 'assignedBy', 'franchise', 'country', 'city', 'area', 'property'])
             ->when($isPartner, function ($q) use ($user) {
-                // Partner can only see packages they created OR packages assigned to them
-                $q->where(function ($query) use ($user) {
-                    $query->where('user_id', $user->id)
-                        ->orWhere('assigned_to', $user->id);
-                });
+                // Partner can only see packages where they are assigned AND admin is also assigned
+                $q->where('assigned_to', $user->id)
+                  ->whereNotNull('admin_id');
             })
             ->when($isAdmin && !$isSuperAdmin, function ($q) use ($user) {
-                // Admin can see packages they created OR packages assigned to them
+                // Admin (Franchise) can see packages they created OR packages in their franchise OR packages where they are assigned as admin
                 $q->where(function ($query) use ($user) {
                     $query->where('user_id', $user->id)
-                        ->orWhere('assigned_to', $user->id);
+                          ->orWhere('franchise_id', $user->id)
+                          ->orWhere('assigned_by', $user->id)
+                          ->orWhere('admin_id', $user->id);
                 });
             });
             // Super Admin sees everything - no filter needed
@@ -66,9 +66,16 @@ class PackageController extends Controller
 
         $packages = $query->latest()->get()->map(function ($package) {
             $package->is_expired = $package->expiration_date < now();
-            $package->current_bookings = Booking::where('package_id', $package->id)
+
+            // Load bookings with user information
+            $bookingsData = Booking::where('package_id', $package->id)
+                ->with('user')
                 ->whereIn('payment_status', ['pending', 'partially_paid', 'paid'])
-                ->count();
+                ->latest()
+                ->get();
+
+            $package->bookings_data = $bookingsData;
+            $package->current_bookings = $bookingsData->count();
 
             // Explicitly load assignedPartner if assigned_to exists
             if ($package->assigned_to && !$package->relationLoaded('assignedPartner')) {
@@ -78,7 +85,22 @@ class PackageController extends Controller
             return $package;
         });
 
-        $availablePartners = User::role('Partner')->get();
+        // Fetch both Partners and Admins for assignment
+        $availablePartners = User::role('Partner')->get()->map(function ($user) {
+            return [
+                'id' => $user->id,
+                'name' => $user->name,
+                'email' => $user->email,
+            ];
+        });
+
+        $availableAdmins = User::role('Admin')->get()->map(function ($user) {
+            return [
+                'id' => $user->id,
+                'name' => $user->name,
+                'email' => $user->email,
+            ];
+        });
 
         return Inertia::render('Admin/Package/Index', [
             'packages' => $packages->map(function ($pkg) {
@@ -89,8 +111,23 @@ class PackageController extends Controller
                     'expiration_date' => $pkg->expiration_date,
                     'number_of_rooms' => $pkg->number_of_rooms,
                     'assigned_to' => $pkg->assigned_to,
+                    'admin_id' => $pkg->admin_id,
                     'is_expired' => $pkg->is_expired,
                     'current_bookings' => $pkg->current_bookings,
+                    'bookings' => $pkg->bookings_data->map(function ($booking) {
+                        return [
+                            'id' => $booking->id,
+                            'user' => $booking->user ? [
+                                'id' => $booking->user->id,
+                                'name' => $booking->user->name,
+                                'email' => $booking->user->email,
+                            ] : null,
+                            'total_amount' => $booking->total_amount,
+                            'payment_status' => $booking->payment_status,
+                            'from_date' => $booking->from_date,
+                            'to_date' => $booking->to_date,
+                        ];
+                    }),
                     'creator' => $pkg->creator ? [
                         'id' => $pkg->creator->id,
                         'name' => $pkg->creator->name,
@@ -101,13 +138,28 @@ class PackageController extends Controller
                         'name' => $pkg->assignedPartner->name,
                         'email' => $pkg->assignedPartner->email,
                     ] : null,
+                    'assignedAdmin' => $pkg->assignedAdmin ? [
+                        'id' => $pkg->assignedAdmin->id,
+                        'name' => $pkg->assignedAdmin->name,
+                        'email' => $pkg->assignedAdmin->email,
+                    ] : null,
                     'assignedBy' => $pkg->assignedBy ? [
                         'id' => $pkg->assignedBy->id,
                         'name' => $pkg->assignedBy->name,
                     ] : null,
+                    'franchise' => $pkg->franchise ? [
+                        'id' => $pkg->franchise->id,
+                        'name' => $pkg->franchise->name,
+                    ] : null,
                 ];
             })->values(),
             'availablePartners' => $availablePartners,
+            'availableAdmins' => $availableAdmins,
+            'userRole' => [
+                'isPartner' => $isPartner,
+                'isAdmin' => $isAdmin,
+                'isSuperAdmin' => $isSuperAdmin,
+            ],
             'filters' => [
                 'search' => $request->search,
                 'status' => $request->status,
@@ -117,10 +169,18 @@ class PackageController extends Controller
 
     public function show(Package $package)
     {
+        $user = Auth::user();
+        $userRoles = $user->roles->pluck('name');
+        $isPartner = $userRoles->contains('Partner');
+        $isAdmin = $userRoles->contains('Admin');
+        $isSuperAdmin = $userRoles->contains('Super Admin');
+
         $package->load([
             'creator',
             'assignedPartner',
+            'assignedAdmin',
             'assignedBy',
+            'franchise',
             'country',
             'city',
             'area',
@@ -196,6 +256,7 @@ class PackageController extends Controller
                                 'fixed_price' => $price->fixed_price,
                                 'discount_price' => $price->discount_price,
                                 'booking_price' => $price->booking_price,
+                                'rent_advance_price' => $price->rent_advance_price,
                             ];
                         }),
                     ];
@@ -244,6 +305,7 @@ class PackageController extends Controller
                     'to_date' => $booking->to_date,
                     'price' => $booking->price,
                     'booking_price' => $booking->booking_price,
+                    'total_amount' => $booking->total_amount,
                     'number_of_days' => $booking->number_of_days,
                     'price_type' => $booking->price_type,
                     'auto_renewal' => $booking->auto_renewal,
@@ -266,21 +328,97 @@ class PackageController extends Controller
                     }),
                 ];
             }),
+            'userRole' => [
+                'isPartner' => $isPartner,
+                'isAdmin' => $isAdmin,
+                'isSuperAdmin' => $isSuperAdmin,
+            ],
         ]);
     }
 
     public function create()
     {
         $user = Auth::user();
-        $isAdmin = $user->roles->pluck('name')->contains('Super Admin');
+        $userRoles = $user->roles->pluck('name');
+        $isSuperAdmin = $userRoles->contains('Super Admin');
+        $isAdmin = $userRoles->contains('Admin');
+        $isPartner = $userRoles->contains('Partner');
+
+        // Check if user is Admin or Super Admin
+        $canAccessAll = $isSuperAdmin || $isAdmin;
+
+        // Partners cannot create packages
+        if ($isPartner) {
+            return redirect()->route('admin.packages.index')
+                ->with('error', 'Partners do not have permission to create packages.');
+        }
+
+        $documentError = null;
+        $missingDocuments = [];
+        $expiredDocuments = [];
+
+        // Check Partner documents if user is Partner
+        if ($isPartner) {
+            $partnerDocuments = $user->partnerDocuments;
+            $today = now()->toDateString();
+
+            // Check HMO Licence
+            if (!$partnerDocuments || !$partnerDocuments->hmo_licence) {
+                $missingDocuments[] = 'HMO Licence';
+            } elseif ($partnerDocuments->hmo_licence_expiry && $partnerDocuments->hmo_licence_expiry < $today) {
+                $expiredDocuments[] = 'HMO Licence (Expired: ' . $partnerDocuments->hmo_licence_expiry . ')';
+            }
+
+            // Check Gas Certificate
+            if (!$partnerDocuments || !$partnerDocuments->gas_certificate) {
+                $missingDocuments[] = 'Gas Certificate';
+            } elseif ($partnerDocuments->gas_certificate_expiry && $partnerDocuments->gas_certificate_expiry < $today) {
+                $expiredDocuments[] = 'Gas Certificate (Expired: ' . $partnerDocuments->gas_certificate_expiry . ')';
+            }
+
+            // Check EICR Certificate
+            if (!$partnerDocuments || !$partnerDocuments->eicr_certificate) {
+                $missingDocuments[] = 'EICR Certificate';
+            } elseif ($partnerDocuments->eicr_certificate_expiry && $partnerDocuments->eicr_certificate_expiry < $today) {
+                $expiredDocuments[] = 'EICR Certificate (Expired: ' . $partnerDocuments->eicr_certificate_expiry . ')';
+            }
+
+            // Check EPC Certificate
+            if (!$partnerDocuments || !$partnerDocuments->epc_certificate) {
+                $missingDocuments[] = 'EPC Certificate';
+            } elseif ($partnerDocuments->epc_certificate_expiry && $partnerDocuments->epc_certificate_expiry < $today) {
+                $expiredDocuments[] = 'EPC Certificate (Expired: ' . $partnerDocuments->epc_certificate_expiry . ')';
+            }
+
+            // Check Smoke & Fire Certificate
+            if (!$partnerDocuments || !$partnerDocuments->smoke_fire_certificate) {
+                $missingDocuments[] = 'Smoke & Fire Certificate';
+            } elseif ($partnerDocuments->smoke_fire_certificate_expiry && $partnerDocuments->smoke_fire_certificate_expiry < $today) {
+                $expiredDocuments[] = 'Smoke & Fire Certificate (Expired: ' . $partnerDocuments->smoke_fire_certificate_expiry . ')';
+            }
+
+            // Build error message if there are issues
+            if (!empty($missingDocuments) || !empty($expiredDocuments)) {
+                $documentError = 'You must upload all required valid certificates before creating a package.';
+
+                if (!empty($missingDocuments)) {
+                    $documentError .= ' Missing: ' . implode(', ', $missingDocuments) . '.';
+                }
+
+                if (!empty($expiredDocuments)) {
+                    $documentError .= ' Expired: ' . implode(', ', $expiredDocuments) . '.';
+                }
+            }
+        }
 
         return Inertia::render('Admin/Package/Create', [
             'countries' => Country::all(),
             'cities' => City::all(),
             'areas' => Area::all(),
-            'properties' => $isAdmin ? Property::all() : Property::where('user_id', $user->id)->get(),
-            'maintains' => $isAdmin ? Maintain::all() : Maintain::where('user_id', $user->id)->get(),
-            'amenities' => $isAdmin ? Amenity::all() : Amenity::where('user_id', $user->id)->get(),
+            'properties' => $canAccessAll ? Property::all() : Property::where('user_id', $user->id)->get(),
+            'maintains' => $canAccessAll ? Maintain::all() : Maintain::where('user_id', $user->id)->get(),
+            'amenities' => $canAccessAll ? Amenity::all() : Amenity::where('user_id', $user->id)->get(),
+            'documentError' => $documentError,
         ]);
     }
 
@@ -302,30 +440,32 @@ class PackageController extends Controller
             'seating' => 'required|integer|min:0',
             'details' => 'nullable|string',
             'video_link' => 'nullable|url',
-            'entire_property_prices' => 'required_if:is_entire_property,true|array|min:1',
-            'entire_property_prices.*.type' => 'required|in:Day,Week,Month',
-            'entire_property_prices.*.fixed_price' => 'required|numeric|min:0',
-            'entire_property_prices.*.discount_price' => 'nullable|numeric|min:0',
-            'entire_property_prices.*.booking_price' => 'required|numeric|min:0',
-            'rooms' => 'required_if:is_entire_property,false|array|min:1',
-            'rooms.*.name' => 'required|string|max:255',
-            'rooms.*.number_of_beds' => 'required|integer|min:1',
-            'rooms.*.number_of_bathrooms' => 'required|integer|min:0',
-            'rooms.*.prices' => 'required|array|min:1',
-            'rooms.*.prices.*.type' => 'required|in:Day,Week,Month',
-            'rooms.*.prices.*.fixed_price' => 'required|numeric|min:0',
-            'rooms.*.prices.*.discount_price' => 'nullable|numeric|min:0',
-            'rooms.*.prices.*.booking_price' => 'required|numeric|min:0',
+            'entire_property_prices' => 'exclude_if:is_entire_property,false|required|array|min:1',
+            'entire_property_prices.*.type' => 'exclude_if:is_entire_property,false|required|in:Day,Week,Month',
+            'entire_property_prices.*.fixed_price' => 'exclude_if:is_entire_property,false|required|numeric|min:0',
+            'entire_property_prices.*.discount_price' => 'exclude_if:is_entire_property,false|nullable|numeric|min:0',
+            'entire_property_prices.*.booking_price' => 'exclude_if:is_entire_property,false|required|numeric|min:0',
+            'entire_property_prices.*.rent_advance_price' => 'exclude_if:is_entire_property,false|required|numeric|min:0',
+            'rooms' => 'exclude_if:is_entire_property,true|required|array|min:1',
+            'rooms.*.name' => 'exclude_if:is_entire_property,true|required|string|max:255',
+            'rooms.*.number_of_beds' => 'exclude_if:is_entire_property,true|required|integer|min:1',
+            'rooms.*.number_of_bathrooms' => 'exclude_if:is_entire_property,true|required|integer|min:0',
+            'rooms.*.prices' => 'exclude_if:is_entire_property,true|required|array|min:1',
+            'rooms.*.prices.*.type' => 'exclude_if:is_entire_property,true|required|in:Day,Week,Month',
+            'rooms.*.prices.*.fixed_price' => 'exclude_if:is_entire_property,true|required|numeric|min:0',
+            'rooms.*.prices.*.discount_price' => 'exclude_if:is_entire_property,true|nullable|numeric|min:0',
+            'rooms.*.prices.*.booking_price' => 'exclude_if:is_entire_property,true|required|numeric|min:0',
+            'rooms.*.prices.*.rent_advance_price' => 'exclude_if:is_entire_property,true|required|numeric|min:0',
             'freeMaintains' => 'nullable|array',
             'freeMaintains.*' => 'exists:maintains,id',
             'freeAmenities' => 'nullable|array',
             'freeAmenities.*' => 'exists:amenities,id',
             'paidMaintains' => 'nullable|array',
-            'paidMaintains.*.maintain_id' => 'required|exists:maintains,id',
-            'paidMaintains.*.price' => 'required|numeric|min:0',
+            'paidMaintains.*.maintain_id' => 'nullable|exists:maintains,id',
+            'paidMaintains.*.price' => 'nullable|numeric|min:0',
             'paidAmenities' => 'nullable|array',
-            'paidAmenities.*.amenity_id' => 'required|exists:amenities,id',
-            'paidAmenities.*.price' => 'required|numeric|min:0',
+            'paidAmenities.*.amenity_id' => 'nullable|exists:amenities,id',
+            'paidAmenities.*.price' => 'nullable|numeric|min:0',
             'instructions' => 'nullable|array',
             'instructions.*.title' => 'required|string|max:255',
             'instructions.*.description' => 'required|string',
@@ -333,6 +473,66 @@ class PackageController extends Controller
             'photos' => 'nullable|array',
             'photos.*' => 'image|max:5120',
         ]);
+
+        // Check Partner documents before creating package
+        $user = Auth::user();
+        $isPartner = $user->roles->pluck('name')->contains('Partner');
+
+        if ($isPartner) {
+            $partnerDocuments = $user->partnerDocuments;
+            $today = now()->toDateString();
+
+            $missingDocuments = [];
+            $expiredDocuments = [];
+
+            // Check all required documents
+            if (!$partnerDocuments || !$partnerDocuments->hmo_licence) {
+                $missingDocuments[] = 'HMO Licence';
+            } elseif ($partnerDocuments->hmo_licence_expiry && $partnerDocuments->hmo_licence_expiry < $today) {
+                $expiredDocuments[] = 'HMO Licence';
+            }
+
+            if (!$partnerDocuments || !$partnerDocuments->gas_certificate) {
+                $missingDocuments[] = 'Gas Certificate';
+            } elseif ($partnerDocuments->gas_certificate_expiry && $partnerDocuments->gas_certificate_expiry < $today) {
+                $expiredDocuments[] = 'Gas Certificate';
+            }
+
+            if (!$partnerDocuments || !$partnerDocuments->eicr_certificate) {
+                $missingDocuments[] = 'EICR Certificate';
+            } elseif ($partnerDocuments->eicr_certificate_expiry && $partnerDocuments->eicr_certificate_expiry < $today) {
+                $expiredDocuments[] = 'EICR Certificate';
+            }
+
+            if (!$partnerDocuments || !$partnerDocuments->epc_certificate) {
+                $missingDocuments[] = 'EPC Certificate';
+            } elseif ($partnerDocuments->epc_certificate_expiry && $partnerDocuments->epc_certificate_expiry < $today) {
+                $expiredDocuments[] = 'EPC Certificate';
+            }
+
+            if (!$partnerDocuments || !$partnerDocuments->smoke_fire_certificate) {
+                $missingDocuments[] = 'Smoke & Fire Certificate';
+            } elseif ($partnerDocuments->smoke_fire_certificate_expiry && $partnerDocuments->smoke_fire_certificate_expiry < $today) {
+                $expiredDocuments[] = 'Smoke & Fire Certificate';
+            }
+
+            // If there are missing or expired documents, return error
+            if (!empty($missingDocuments) || !empty($expiredDocuments)) {
+                $errorMessage = 'You must upload all required valid certificates before creating a package.';
+
+                if (!empty($missingDocuments)) {
+                    $errorMessage .= ' Missing: ' . implode(', ', $missingDocuments) . '.';
+                }
+
+                if (!empty($expiredDocuments)) {
+                    $errorMessage .= ' Expired: ' . implode(', ', $expiredDocuments) . '.';
+                }
+
+                return redirect()->back()->withErrors([
+                    'documents' => $errorMessage . ' Please update your documents in your profile page.'
+                ])->withInput();
+            }
+        }
 
         try {
             DB::beginTransaction();
@@ -370,6 +570,7 @@ class PackageController extends Controller
                             'fixed_price' => $priceData['fixed_price'],
                             'discount_price' => $priceData['discount_price'] ?? null,
                             'booking_price' => $priceData['booking_price'],
+                            'rent_advance_price' => $priceData['rent_advance_price'] ?? 0,
                             'user_id' => Auth::id(),
                         ]);
                     }
@@ -392,6 +593,7 @@ class PackageController extends Controller
                         'fixed_price' => $priceData['fixed_price'],
                         'discount_price' => $priceData['discount_price'] ?? null,
                         'booking_price' => $priceData['booking_price'],
+                        'rent_advance_price' => $priceData['rent_advance_price'] ?? 0,
                         'user_id' => Auth::id(),
                     ]);
                 }
@@ -482,7 +684,19 @@ class PackageController extends Controller
     public function edit(Package $package)
     {
         $user = Auth::user();
-        $isAdmin = $user->roles->pluck('name')->contains('Super Admin');
+        $userRoles = $user->roles->pluck('name');
+        $isSuperAdmin = $userRoles->contains('Super Admin');
+        $isAdmin = $userRoles->contains('Admin');
+        $isPartner = $userRoles->contains('Partner');
+
+        // Check if user is Admin or Super Admin
+        $canAccessAll = $isSuperAdmin || $isAdmin;
+
+        // Partners cannot edit packages
+        if ($isPartner) {
+            return redirect()->route('admin.packages.index')
+                ->with('error', 'Partners do not have permission to edit packages.');
+        }
 
         $package->load([
             'packageMaintains.maintain',
@@ -530,9 +744,9 @@ class PackageController extends Controller
             'countries' => Country::all(),
             'cities' => City::all(),
             'areas' => Area::all(),
-            'properties' => $isAdmin ? Property::all() : Property::where('user_id', $user->id)->get(),
-            'maintains' => $isAdmin ? Maintain::all() : Maintain::where('user_id', $user->id)->get(),
-            'amenities' => $isAdmin ? Amenity::all() : Amenity::where('user_id', $user->id)->get(),
+            'properties' => $canAccessAll ? Property::all() : Property::where('user_id', $user->id)->get(),
+            'maintains' => $canAccessAll ? Maintain::all() : Maintain::where('user_id', $user->id)->get(),
+            'amenities' => $canAccessAll ? Amenity::all() : Amenity::where('user_id', $user->id)->get(),
         ]);
     }
 
@@ -554,33 +768,35 @@ class PackageController extends Controller
             'seating' => 'required|integer|min:0',
             'details' => 'nullable|string',
             'video_link' => 'nullable|url',
-            'entire_property_prices' => 'required_if:is_entire_property,true|array|min:1',
-            'entire_property_prices.*.id' => 'nullable|exists:room_prices,id',
-            'entire_property_prices.*.type' => 'required|in:Day,Week,Month',
-            'entire_property_prices.*.fixed_price' => 'required|numeric|min:0',
-            'entire_property_prices.*.discount_price' => 'nullable|numeric|min:0',
-            'entire_property_prices.*.booking_price' => 'required|numeric|min:0',
-            'rooms' => 'required_if:is_entire_property,false|array|min:1',
-            'rooms.*.id' => 'nullable|exists:rooms,id',
-            'rooms.*.name' => 'required|string|max:255',
-            'rooms.*.number_of_beds' => 'required|integer|min:1',
-            'rooms.*.number_of_bathrooms' => 'required|integer|min:0',
-            'rooms.*.prices' => 'required|array|min:1',
-            'rooms.*.prices.*.id' => 'nullable|exists:room_prices,id',
-            'rooms.*.prices.*.type' => 'required|in:Day,Week,Month',
-            'rooms.*.prices.*.fixed_price' => 'required|numeric|min:0',
-            'rooms.*.prices.*.discount_price' => 'nullable|numeric|min:0',
-            'rooms.*.prices.*.booking_price' => 'required|numeric|min:0',
+            'entire_property_prices' => 'exclude_if:is_entire_property,false|required|array|min:1',
+            'entire_property_prices.*.id' => 'exclude_if:is_entire_property,false|nullable|exists:room_prices,id',
+            'entire_property_prices.*.type' => 'exclude_if:is_entire_property,false|required|in:Day,Week,Month',
+            'entire_property_prices.*.fixed_price' => 'exclude_if:is_entire_property,false|required|numeric|min:0',
+            'entire_property_prices.*.discount_price' => 'exclude_if:is_entire_property,false|nullable|numeric|min:0',
+            'entire_property_prices.*.booking_price' => 'exclude_if:is_entire_property,false|required|numeric|min:0',
+            'entire_property_prices.*.rent_advance_price' => 'exclude_if:is_entire_property,false|required|numeric|min:0',
+            'rooms' => 'exclude_if:is_entire_property,true|required|array|min:1',
+            'rooms.*.id' => 'exclude_if:is_entire_property,true|nullable|exists:rooms,id',
+            'rooms.*.name' => 'exclude_if:is_entire_property,true|required|string|max:255',
+            'rooms.*.number_of_beds' => 'exclude_if:is_entire_property,true|required|integer|min:1',
+            'rooms.*.number_of_bathrooms' => 'exclude_if:is_entire_property,true|required|integer|min:0',
+            'rooms.*.prices' => 'exclude_if:is_entire_property,true|required|array|min:1',
+            'rooms.*.prices.*.id' => 'exclude_if:is_entire_property,true|nullable|exists:room_prices,id',
+            'rooms.*.prices.*.type' => 'exclude_if:is_entire_property,true|required|in:Day,Week,Month',
+            'rooms.*.prices.*.fixed_price' => 'exclude_if:is_entire_property,true|required|numeric|min:0',
+            'rooms.*.prices.*.discount_price' => 'exclude_if:is_entire_property,true|nullable|numeric|min:0',
+            'rooms.*.prices.*.booking_price' => 'exclude_if:is_entire_property,true|required|numeric|min:0',
+            'rooms.*.prices.*.rent_advance_price' => 'exclude_if:is_entire_property,true|required|numeric|min:0',
             'freeMaintains' => 'nullable|array',
             'freeMaintains.*' => 'exists:maintains,id',
             'freeAmenities' => 'nullable|array',
             'freeAmenities.*' => 'exists:amenities,id',
             'paidMaintains' => 'nullable|array',
-            'paidMaintains.*.maintain_id' => 'required|exists:maintains,id',
-            'paidMaintains.*.price' => 'required|numeric|min:0',
+            'paidMaintains.*.maintain_id' => 'nullable|exists:maintains,id',
+            'paidMaintains.*.price' => 'nullable|numeric|min:0',
             'paidAmenities' => 'nullable|array',
-            'paidAmenities.*.amenity_id' => 'required|exists:amenities,id',
-            'paidAmenities.*.price' => 'required|numeric|min:0',
+            'paidAmenities.*.amenity_id' => 'nullable|exists:amenities,id',
+            'paidAmenities.*.price' => 'nullable|numeric|min:0',
             'instructions' => 'nullable|array',
             'instructions.*.id' => 'nullable|exists:package_instructions,id',
             'instructions.*.title' => 'required|string|max:255',
@@ -637,6 +853,7 @@ class PackageController extends Controller
                                     'fixed_price' => $priceData['fixed_price'],
                                     'discount_price' => $priceData['discount_price'] ?? null,
                                     'booking_price' => $priceData['booking_price'],
+                                    'rent_advance_price' => $priceData['rent_advance_price'] ?? 0,
                                 ]);
                                 $existingPriceIds[] = $price->id;
                             }
@@ -647,6 +864,7 @@ class PackageController extends Controller
                                 'fixed_price' => $priceData['fixed_price'],
                                 'discount_price' => $priceData['discount_price'] ?? null,
                                 'booking_price' => $priceData['booking_price'],
+                                'rent_advance_price' => $priceData['rent_advance_price'] ?? 0,
                                 'user_id' => Auth::id(),
                             ]);
                             $existingPriceIds[] = $price->id;
@@ -701,6 +919,7 @@ class PackageController extends Controller
                             'fixed_price' => $priceData['fixed_price'],
                             'discount_price' => $priceData['discount_price'] ?? null,
                             'booking_price' => $priceData['booking_price'],
+                            'rent_advance_price' => $priceData['rent_advance_price'] ?? 0,
                         ]);
                         $existingPriceIds[] = $price->id;
                     } else {
@@ -710,6 +929,7 @@ class PackageController extends Controller
                             'fixed_price' => $priceData['fixed_price'],
                             'discount_price' => $priceData['discount_price'] ?? null,
                             'booking_price' => $priceData['booking_price'],
+                            'rent_advance_price' => $priceData['rent_advance_price'] ?? 0,
                             'user_id' => Auth::id(),
                         ]);
                         $existingPriceIds[] = $price->id;
@@ -839,6 +1059,15 @@ class PackageController extends Controller
 
     public function destroy(Package $package)
     {
+        $user = Auth::user();
+        $isPartner = $user->roles->pluck('name')->contains('Partner');
+
+        // Partners cannot delete packages
+        if ($isPartner) {
+            return redirect()->route('admin.packages.index')
+                ->with('error', 'Partners do not have permission to delete packages.');
+        }
+
         try {
             // Delete associated photos
             foreach ($package->photos as $photo) {
@@ -858,31 +1087,41 @@ class PackageController extends Controller
     public function assign(Request $request, Package $package)
     {
         $validated = $request->validate([
-            'user_id' => 'nullable|exists:users,id',
+            'partner_id' => 'nullable|exists:users,id',
+            'admin_id' => 'nullable|exists:users,id',
         ]);
 
-        // If user_id is null, remove assignment
-        if (empty($validated['user_id'])) {
-            $package->update([
-                'assigned_to' => null,
-                'assigned_by' => null,
-                'assigned_at' => null,
-            ]);
+        $user = Auth::user();
+        $userRoles = $user->roles->pluck('name');
+        $isSuperAdmin = $userRoles->contains('Super Admin');
+        $isAdmin = $userRoles->contains('Admin');
+        $isPartner = $userRoles->contains('Partner');
 
-            // Refresh package with relationships
-            $package->load(['creator', 'assignedPartner', 'assignedBy']);
+        // Check if user has permission to assign packages
+        if (!$isSuperAdmin && !$isAdmin) {
+            return redirect()->back()->with('error', 'You do not have permission to assign packages.');
+        }
 
-            return redirect()->back()->with('success', 'Package assignment removed successfully.');
+        // Determine franchise_id based on who is assigning
+        $franchiseId = null;
+        if ($isAdmin && !$isSuperAdmin) {
+            // If Admin (Franchise) is assigning, set franchise_id to their user_id
+            $franchiseId = $user->id;
+        } elseif ($isSuperAdmin) {
+            // If Super Admin is assigning, keep existing franchise_id or set to null
+            $franchiseId = $package->franchise_id;
         }
 
         $package->update([
-            'assigned_to' => $validated['user_id'],
+            'assigned_to' => $validated['partner_id'] ?? null,
+            'admin_id' => $validated['admin_id'] ?? null,
             'assigned_by' => Auth::id(),
+            'franchise_id' => $franchiseId,
             'assigned_at' => now(),
         ]);
 
-        // Refresh package with relationships to ensure assignedPartner is loaded
-        $package->load(['creator', 'assignedPartner', 'assignedBy']);
+        // Refresh package with relationships
+        $package->load(['creator', 'assignedPartner', 'assignedAdmin', 'assignedBy', 'franchise']);
 
         return redirect()->back()->with('success', 'Package assigned successfully.');
     }

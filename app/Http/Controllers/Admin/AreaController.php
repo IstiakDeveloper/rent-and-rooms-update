@@ -24,11 +24,14 @@ class AreaController extends Controller
     public function create()
     {
         $countries = Country::all();
-        $cities = collect(); // Empty initially
+        // Load UK cities by default (UK ID = 1)
+        $ukCountry = Country::where('name', 'LIKE', '%UK%')->orWhere('name', 'LIKE', '%United Kingdom%')->first();
+        $cities = $ukCountry ? City::where('country_id', $ukCountry->id)->get(['id', 'name']) : collect();
 
         return Inertia::render('Admin/Area/Create', [
             'countries' => $countries,
             'cities' => $cities,
+            'defaultCountryId' => $ukCountry?->id,
         ]);
     }
 

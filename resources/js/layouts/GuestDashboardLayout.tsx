@@ -13,6 +13,9 @@ import {
     Bell,
     MessageSquare,
     ChevronRight,
+    LayoutDashboard,
+    AlertCircle,
+    CheckCircle,
 } from 'lucide-react';
 
 interface NavItem {
@@ -26,7 +29,9 @@ interface AuthUser {
     id: number;
     name: string;
     email: string;
+    email_verified_at?: string | null;
     role?: string;
+    role_name?: string;
     status?: string;
 }
 
@@ -41,6 +46,8 @@ interface PageProps {
     auth: {
         user: AuthUser;
     };
+    unreadMessagesCount?: number;
+    unreadNotificationsCount?: number;
     flash?: FlashMessages;
     [key: string]: any;
 }
@@ -50,7 +57,7 @@ interface GuestDashboardLayoutProps {
 }
 
 export default function GuestDashboardLayout({ children }: PropsWithChildren<GuestDashboardLayoutProps>) {
-    const { auth, flash } = usePage<PageProps>().props;
+    const { auth, flash, unreadMessagesCount = 0, unreadNotificationsCount = 0 } = usePage<PageProps>().props;
     const [sidebarOpen, setSidebarOpen] = useState(false);
     const [userDropdownOpen, setUserDropdownOpen] = useState(false);
 
@@ -74,8 +81,18 @@ export default function GuestDashboardLayout({ children }: PropsWithChildren<Gue
         return user.role;
     };
 
+    // Check if user needs email verification (not Super Admin and email not verified)
+    const userRole = auth.user?.role_name || auth.user?.role;
+    const isSuperAdmin = userRole === 'Super Admin';
+    const needsEmailVerification = auth?.user && !auth.user.email_verified_at && !isSuperAdmin;
+
+    const handleVerifyEmail = () => {
+        router.visit('/email/verify');
+    };
+
     const navigation: NavItem[] = [
-        { name: 'Dashboard', href: '/guest/dashboard', icon: Home },
+        { name: 'Home', href: '/', icon: Home },
+        { name: 'Dashboard', href: '/guest/dashboard', icon: LayoutDashboard },
         { name: 'My Bookings', href: '/guest/bookings', icon: Calendar },
         { name: 'Payments', href: '/guest/payments', icon: CreditCard },
         { name: 'Documents', href: '/guest/documents', icon: FileText },
@@ -137,6 +154,7 @@ export default function GuestDashboardLayout({ children }: PropsWithChildren<Gue
                     {navigation.map((item) => {
                         const Icon = item.icon;
                         const active = isActive(item.href || '#');
+                        const showBadge = item.name === 'Messages' && unreadMessagesCount > 0;
 
                         return (
                             <Link
@@ -153,7 +171,12 @@ export default function GuestDashboardLayout({ children }: PropsWithChildren<Gue
                                     active ? 'text-white' : 'text-gray-400 group-hover:text-blue-600'
                                 }`} />
                                 <span className="flex-1">{item.name}</span>
-                                {active && (
+                                {showBadge && (
+                                    <span className="inline-flex items-center justify-center px-2 py-0.5 text-xs font-bold leading-none text-white bg-red-500 rounded-full animate-pulse">
+                                        {unreadMessagesCount > 99 ? '99+' : unreadMessagesCount}
+                                    </span>
+                                )}
+                                {active && !showBadge && (
                                     <ChevronRight className="h-4 w-4 text-white" />
                                 )}
                             </Link>
@@ -212,10 +235,17 @@ export default function GuestDashboardLayout({ children }: PropsWithChildren<Gue
                         {/* Right Side Actions */}
                         <div className="flex items-center space-x-3">
                             {/* Notifications */}
-                            <button className="relative p-2 text-gray-600 hover:text-blue-600 hover:bg-gray-100 rounded-lg transition-colors">
+                            <Link
+                                href="/guest/messages"
+                                className="relative p-2 text-gray-600 hover:text-blue-600 hover:bg-gray-100 rounded-lg transition-colors"
+                            >
                                 <Bell className="h-5 w-5" />
-                                <span className="absolute top-1 right-1 w-2 h-2 bg-red-500 rounded-full"></span>
-                            </button>
+                                {unreadNotificationsCount > 0 && (
+                                    <span className="absolute top-0 right-0 inline-flex items-center justify-center px-1.5 py-0.5 text-xs font-bold leading-none text-white transform translate-x-1/2 -translate-y-1/2 bg-red-500 rounded-full animate-pulse">
+                                        {unreadNotificationsCount > 9 ? '9+' : unreadNotificationsCount}
+                                    </span>
+                                )}
+                            </Link>
 
                             {/* User Dropdown */}
                             <div className="relative">
@@ -238,16 +268,6 @@ export default function GuestDashboardLayout({ children }: PropsWithChildren<Gue
                                                 {getDisplayRole(auth.user)}
                                             </span>
                                         </div>
-                                        <div className="py-2">
-                                            <Link
-                                                href="/"
-                                                onClick={() => setUserDropdownOpen(false)}
-                                                className="flex items-center space-x-3 px-4 py-2.5 text-sm text-gray-700 hover:bg-blue-50 hover:text-blue-700 transition-colors"
-                                            >
-                                                <Home className="h-4 w-4" />
-                                                <span>Back to Home</span>
-                                            </Link>
-                                        </div>
                                         <div className="border-t border-gray-100 pt-2">
                                             <button
                                                 onClick={() => {
@@ -266,6 +286,34 @@ export default function GuestDashboardLayout({ children }: PropsWithChildren<Gue
                         </div>
                     </div>
                 </header>
+
+                {/* Email Verification Alert */}
+                {needsEmailVerification && (
+                    <div className="bg-gradient-to-r from-yellow-50 to-amber-50 border-b-2 border-yellow-400 sticky top-16 z-30">
+                        <div className="px-4 sm:px-6 lg:px-8 py-4">
+                            <div className="flex items-center justify-between">
+                                <div className="flex items-center space-x-3 flex-1">
+                                    <AlertCircle className="h-6 w-6 text-yellow-600 flex-shrink-0 animate-pulse" />
+                                    <div className="flex-1">
+                                        <p className="text-sm font-semibold text-gray-900">
+                                            Email Verification Required
+                                        </p>
+                                        <p className="text-xs text-gray-700 mt-0.5">
+                                            Please verify your email address to access all features.
+                                        </p>
+                                    </div>
+                                </div>
+                                <button
+                                    onClick={handleVerifyEmail}
+                                    className="ml-4 px-4 py-2 bg-gradient-to-r from-yellow-500 to-amber-600 text-white text-sm font-semibold rounded-lg hover:from-yellow-600 hover:to-amber-700 transition-all duration-300 hover:scale-105 hover:shadow-lg flex items-center space-x-2 flex-shrink-0"
+                                >
+                                    <CheckCircle className="h-4 w-4" />
+                                    <span>Verify Email</span>
+                                </button>
+                            </div>
+                        </div>
+                    </div>
+                )}
 
                 {/* Flash Messages */}
                 {flash && (

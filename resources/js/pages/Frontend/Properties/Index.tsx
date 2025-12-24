@@ -377,7 +377,7 @@ export default function PropertiesIndex({
                     <div className="absolute -top-1/2 -left-1/2 w-full h-full bg-white/5 rounded-full animate-pulse"></div>
                     <div className="absolute -bottom-1/2 -right-1/2 w-full h-full bg-white/5 rounded-full animate-pulse"></div>
                 </div>
-                <div className="relative max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
+                <div className="relative max-w-[1920px] mx-auto px-4 sm:px-6 lg:px-8">
                     <h1 className="text-4xl md:text-6xl font-bold mb-4">Find Your Perfect Property</h1>
                     <p className="text-xl md:text-2xl text-indigo-100 mb-8">
                         Discover {packages.total}+ amazing properties across the UK
@@ -399,7 +399,7 @@ export default function PropertiesIndex({
             </div>
 
             {/* Main Content */}
-            <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-8">
+            <div className="max-w-[1920px] mx-auto px-4 sm:px-6 lg:px-8 py-8">
                 <div className="flex flex-col lg:flex-row gap-8">
                     {/* Desktop Sidebar */}
                     <aside className="hidden lg:block w-80 shrink-0">

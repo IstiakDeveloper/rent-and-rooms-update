@@ -15,7 +15,8 @@ class RoomPrice extends Model
         'type',
         'fixed_price',
         'discount_price',
-        'booking_price'
+        'booking_price',
+        'rent_advance_price'
     ];
 
     public function room()

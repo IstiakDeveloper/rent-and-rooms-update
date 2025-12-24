@@ -13,6 +13,11 @@ interface Area {
     name: string;
 }
 
+interface PropertyType {
+    id: number;
+    type: string;
+}
+
 interface Photo {
     id: number;
     url: string;
@@ -123,10 +128,11 @@ interface HomeProps {
     homeData: HomeData[];
     countries: Country[];
     selectedCountry: number;
-    filters: {
+    propertyTypes: PropertyType[];
+    filters?: {
         city_id?: number;
         area_id?: number;
-        keyword?: string;
+        property_type_id?: number;
     };
 }
 
@@ -142,6 +148,7 @@ export default function Home({
     homeData,
     countries,
     selectedCountry,
+    propertyTypes,
     filters = {}
 }: HomeProps) {
     const { auth } = usePage<{ auth: AuthUser }>().props;
@@ -159,7 +166,7 @@ export default function Home({
 
     const [selectedCity, setSelectedCity] = useState<number | string>(filters.city_id || '');
     const [selectedArea, setSelectedArea] = useState<number | string>(filters.area_id || '');
-    const [keyword, setKeyword] = useState(filters.keyword || '');
+    const [propertyType, setPropertyType] = useState<number | string>(filters.property_type_id || '');
     const [localAreas, setLocalAreas] = useState<Area[]>(areas);
 
     // Update areas when city changes
@@ -182,16 +189,36 @@ export default function Home({
         }
     }, [selectedCity]);
 
+    // Auto-search when filters change (without scroll)
+    useEffect(() => {
+        // Only trigger search if at least one filter is selected
+        if (selectedCity || selectedArea || propertyType) {
+            const params: any = {};
+            if (selectedCity) params.city_id = selectedCity;
+            if (selectedArea) params.area_id = selectedArea;
+            if (propertyType) params.property_type_id = propertyType;
+
+            const timeoutId = setTimeout(() => {
+                router.get('/', params, {
+                    preserveState: true,
+                    preserveScroll: true, // Don't scroll automatically
+                });
+            }, 300); // 300ms debounce to avoid too many requests
+
+            return () => clearTimeout(timeoutId);
+        }
+    }, [selectedCity, selectedArea, propertyType]);
+
     const handleSearch = () => {
         const params: any = {};
         if (selectedCity) params.city_id = selectedCity;
         if (selectedArea) params.area_id = selectedArea;
-        if (keyword) params.keyword = keyword;
+        if (propertyType) params.property_type_id = propertyType;
 
         router.get('/', params, {
             preserveState: true,
             onSuccess: () => {
-                // Scroll to results
+                // Scroll to results only when button is clicked
                 const element = document.getElementById('filterPackage');
                 if (element) {
                     element.scrollIntoView({ behavior: 'smooth', block: 'start' });
@@ -290,7 +317,7 @@ export default function Home({
         const propertyPriceIndicator = propertyPriceType ? getPropertyPriceIndicator(propertyPriceType) : '';
 
         console.log('Room Price Data:', roomPriceData);
-        console.log('Property Price Data:', propertyPriceData);        const cardSize = isFeatured ? 'h-44' : 'h-48';
+        console.log('Property Price Data:', propertyPriceData); const cardSize = isFeatured ? 'h-44' : 'h-48';
         const textSize = isFeatured ? 'text-sm' : 'text-base';
         const priceSize = isFeatured ? 'text-base' : 'text-lg';
 
@@ -426,84 +453,88 @@ export default function Home({
                     <div className="absolute bottom-20 right-10 w-96 h-96 bg-white/10 rounded-full blur-3xl animate-float-delay"></div>
                 </div>
 
-                <div className="relative z-10 max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-16 sm:py-24">
+                <div className="relative z-10 max-w-[1920px] mx-auto px-4 sm:px-6 lg:px-8 py-16 sm:py-24">
                     <div className="text-center mb-12">
                         <p className="text-yellow-300 text-sm sm:text-base font-bold tracking-widest uppercase mb-4 animate-fade-in-down flex items-center justify-center space-x-2">
                             <Sparkles className="h-5 w-5" />
                             <span>{heroSection?.title_small}</span>
                             <Sparkles className="h-5 w-5" />
                         </p>
-                        <h1 className="text-white text-4xl sm:text-5xl lg:text-6xl font-black leading-tight mb-6 animate-fade-in-up">
+                        <h1 className="text-white text-3xl sm:text-4xl lg:text-5xl font-black leading-tight mb-6 animate-fade-in-up">
                             {heroSection?.title_big}
                         </h1>
                         <p className="text-white/90 text-lg sm:text-xl max-w-2xl mx-auto animate-fade-in">
-                            Discover amazing properties in prime locations. Your dream home awaits!
+                            Discover amazing properties in Prime Locations. Suitable Location & Friendly Environment within your budget
                         </p>
                     </div>
 
                     {/* Search Form */}
-                    <div className="max-w-4xl mx-auto">
-                                            {/* Modern Search Form */}
-                    <div className="max-w-5xl mx-auto animate-fade-in-up-delay">
-                        <div className="bg-white/95 backdrop-blur-lg rounded-3xl shadow-2xl p-6 sm:p-8 border border-white/20">
-                            <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
-                                <div>
-                                    <label className="block text-sm font-bold text-gray-700 mb-2">City</label>
-                                    <select
-                                        value={selectedCity}
-                                        onChange={(e) => setSelectedCity(e.target.value)}
-                                        className="w-full px-4 py-3 text-sm border-2 border-gray-200 rounded-xl focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500 transition-all duration-200 bg-white"
-                                    >
-                                        <option value="">Select City</option>
-                                        {cities.map((city) => (
-                                            <option key={city.id} value={city.id}>
-                                                {city.name}
-                                            </option>
-                                        ))}
-                                    </select>
-                                </div>
+                    <div className="w-full mx-auto">
+                        {/* Modern Search Form */}
+                        <div className="w-full mx-auto animate-fade-in-up-delay">
+                            <div className="bg-white/95 backdrop-blur-lg rounded-3xl shadow-2xl p-6 sm:p-8 border border-white/20">
+                                <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
+                                    <div>
+                                        <label className="block text-sm font-bold text-gray-700 mb-2">City</label>
+                                        <select
+                                            value={selectedCity}
+                                            onChange={(e) => setSelectedCity(e.target.value)}
+                                            className="w-full px-4 py-3 text-sm border-2 border-gray-200 rounded-xl focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500 transition-all duration-200 bg-white"
+                                        >
+                                            <option value="">Select City</option>
+                                            {cities.map((city) => (
+                                                <option key={city.id} value={city.id}>
+                                                    {city.name}
+                                                </option>
+                                            ))}
+                                        </select>
+                                    </div>
 
-                                <div>
-                                    <label className="block text-sm font-bold text-gray-700 mb-2">Area</label>
-                                    <select
-                                        value={selectedArea}
-                                        onChange={(e) => setSelectedArea(e.target.value)}
-                                        className="w-full px-4 py-3 text-sm border-2 border-gray-200 rounded-xl focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500 transition-all duration-200 bg-white disabled:bg-gray-50 disabled:text-gray-500"
-                                        disabled={!selectedCity}
-                                    >
-                                        <option value="">Select Area</option>
-                                        {localAreas.map((area) => (
-                                            <option key={area.id} value={area.id}>
-                                                {area.name}
-                                            </option>
-                                        ))}
-                                    </select>
-                                </div>
+                                    <div>
+                                        <label className="block text-sm font-bold text-gray-700 mb-2">Area</label>
+                                        <select
+                                            value={selectedArea}
+                                            onChange={(e) => setSelectedArea(e.target.value)}
+                                            className="w-full px-4 py-3 text-sm border-2 border-gray-200 rounded-xl focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500 transition-all duration-200 bg-white disabled:bg-gray-50 disabled:text-gray-500"
+                                            disabled={!selectedCity}
+                                        >
+                                            <option value="">Select Area</option>
+                                            {localAreas.map((area) => (
+                                                <option key={area.id} value={area.id}>
+                                                    {area.name}
+                                                </option>
+                                            ))}
+                                        </select>
+                                    </div>
 
-                                <div>
-                                    <label className="block text-sm font-bold text-gray-700 mb-2">Keyword</label>
-                                    <input
-                                        type="text"
-                                        value={keyword}
-                                        onChange={(e) => setKeyword(e.target.value)}
-                                        onKeyPress={(e) => e.key === 'Enter' && handleSearch()}
-                                        placeholder="Search properties..."
-                                        className="w-full px-4 py-3 text-sm border-2 border-gray-200 rounded-xl focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500 transition-all duration-200"
-                                    />
-                                </div>
+                                    <div>
+                                        <label className="block text-sm font-bold text-gray-700 mb-2">Property Type</label>
+                                        <select
+                                            value={propertyType}
+                                            onChange={(e) => setPropertyType(e.target.value)}
+                                            className="w-full px-4 py-3 text-sm border-2 border-gray-200 rounded-xl focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500 transition-all duration-200 bg-white"
+                                        >
+                                            <option value="">Select Property Type</option>
+                                            {propertyTypes.map((type) => (
+                                                <option key={type.id} value={type.id}>
+                                                    {type.type}
+                                                </option>
+                                            ))}
+                                        </select>
+                                    </div>
 
-                                <div className="flex items-end">
-                                    <button
-                                        onClick={handleSearch}
-                                        className="w-full bg-gradient-to-r from-indigo-600 to-purple-600 hover:from-indigo-700 hover:to-purple-700 text-white text-sm font-bold py-3 px-6 rounded-xl transition-all duration-300 transform hover:scale-105 hover:shadow-xl flex items-center justify-center space-x-2"
-                                    >
-                                        <Search className="h-5 w-5" />
-                                        <span>Search Properties</span>
-                                    </button>
+                                    <div className="flex items-end">
+                                        <button
+                                            onClick={handleSearch}
+                                            className="w-full bg-gradient-to-r from-indigo-600 to-purple-600 hover:from-indigo-700 hover:to-purple-700 text-white text-sm font-bold py-3 px-6 rounded-xl transition-all duration-300 transform hover:scale-105 hover:shadow-xl flex items-center justify-center space-x-2"
+                                        >
+                                            <Search className="h-5 w-5" />
+                                            <span>Search Properties</span>
+                                        </button>
+                                    </div>
                                 </div>
                             </div>
                         </div>
-                    </div>
                     </div>
                 </div>
             </section>
@@ -511,7 +542,7 @@ export default function Home({
             {/* Search Results */}
             {packages && packages.length > 0 && (
                 <section id="filterPackage" className="py-16 bg-gray-50">
-                    <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
+                    <div className="max-w-[1920px] mx-auto px-4 sm:px-6 lg:px-8">
                         <div className="mb-8">
                             <div className="flex items-center justify-between">
                                 <div>
@@ -563,7 +594,7 @@ export default function Home({
 
             {/* Features Section */}
             <section className="py-20 bg-gradient-to-br from-gray-50 to-gray-100">
-                <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
+                <div className="max-w-[1920px] mx-auto px-4 sm:px-6 lg:px-8">
                     <div className="text-center mb-16">
                         <h2 className="text-4xl font-black text-gray-900 mb-4">
                             Why Choose Us?
@@ -609,7 +640,7 @@ export default function Home({
 
             {/* Featured Properties */}
             <section className="py-20 bg-white">
-                <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
+                <div className="max-w-[1920px] mx-auto px-4 sm:px-6 lg:px-8">
                     <div className="text-center mb-12">
                         <p className="text-indigo-600 font-bold text-sm uppercase tracking-wider mb-3 flex items-center justify-center space-x-2">
                             <Sparkles className="h-4 w-4" />
@@ -648,7 +679,7 @@ export default function Home({
             {/* Home Data Sections */}
             {homeData && homeData.length > 0 && (
                 <section className="py-20 bg-gradient-to-br from-gray-50 to-gray-100">
-                    <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
+                    <div className="max-w-[1920px] mx-auto px-4 sm:px-6 lg:px-8">
                         {homeData.map((section) => (
                             <div key={section.id} className="mb-16 last:mb-0">
                                 <div className="text-center mb-12">

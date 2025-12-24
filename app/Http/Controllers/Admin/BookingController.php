@@ -19,12 +19,16 @@ use Inertia\Inertia;
 
 class BookingController extends Controller
 {
-    public function index()
+    public function index(Request $request)
     {
         $user = Auth::user();
+        $userRoles = $user->roles->pluck('name');
+        $isSuperAdmin = $userRoles->contains('Super Admin');
+        $isAdmin = $userRoles->contains('Admin');
+        $isPartner = $userRoles->contains('Partner');
 
-        // For now, show all bookings (will implement role check later)
-        $bookings = Booking::with([
+        // Build query with filters
+        $query = Booking::with([
             'user',
             'package.country',
             'package.city',
@@ -32,16 +36,66 @@ class BookingController extends Controller
             'bookingPayments',
             'bookingAmenities.amenity',
             'bookingMaintains.maintain',
-            'bookingRoomPrices.roomPrice'
-        ])->latest()->paginate(15);
+            'bookingRoomPrices.room'
+        ])
+        ->when($isPartner, function($q) use ($user) {
+            // Partner sees only bookings for packages assigned to them AND have admin assigned
+            return $q->whereHas('package', function($query) use ($user) {
+                $query->where('assigned_to', $user->id)
+                      ->whereNotNull('admin_id');
+            });
+        })
+        ->when($isAdmin && !$isSuperAdmin, function($q) use ($user) {
+            // Admin sees only bookings for packages where they are assigned as admin
+            return $q->whereHas('package', function($query) use ($user) {
+                $query->where('admin_id', $user->id);
+            });
+        });
+
+        // Search filter
+        if ($request->filled('search')) {
+            $search = $request->search;
+            $query->where(function($q) use ($search) {
+                $q->whereHas('user', function($q) use ($search) {
+                    $q->where('name', 'like', "%{$search}%")
+                      ->orWhere('email', 'like', "%{$search}%");
+                })
+                ->orWhereHas('package', function($q) use ($search) {
+                    $q->where('name', 'like', "%{$search}%");
+                });
+            });
+        }
+
+        // Status filter
+        if ($request->filled('status')) {
+            $query->where('status', $request->status);
+        }
+
+        // Payment status filter
+        if ($request->filled('payment_status')) {
+            $query->where('payment_status', $request->payment_status);
+        }
+
+        $bookings = $query->latest()->paginate(15);
 
         return Inertia::render('Admin/Booking/Index', [
             'bookings' => $bookings,
+            'userRole' => [
+                'isPartner' => $isPartner,
+                'isAdmin' => $isAdmin,
+                'isSuperAdmin' => $isSuperAdmin,
+            ],
         ]);
     }
 
     public function show(Booking $booking)
     {
+        $user = Auth::user();
+        $userRoles = $user->roles->pluck('name');
+        $isPartner = $userRoles->contains('Partner');
+        $isAdmin = $userRoles->contains('Admin');
+        $isSuperAdmin = $userRoles->contains('Super Admin');
+
         $booking->load([
             'user',
             'package' => function($query) {
@@ -56,11 +110,16 @@ class BookingController extends Controller
             'bookingPayments',
             'bookingAmenities.amenity',
             'bookingMaintains.maintain',
-            'bookingRoomPrices.roomPrice'
+            'bookingRoomPrices.room'
         ]);
 
         return Inertia::render('Admin/Booking/Show', [
             'booking' => $booking,
+            'userRole' => [
+                'isPartner' => $isPartner,
+                'isAdmin' => $isAdmin,
+                'isSuperAdmin' => $isSuperAdmin,
+            ],
         ]);
     }
 
@@ -172,10 +231,19 @@ class BookingController extends Controller
 
     public function edit(Booking $booking)
     {
+        $user = Auth::user();
+        $isPartner = $user->roles->pluck('name')->contains('Partner');
+
+        // Partners cannot edit bookings
+        if ($isPartner) {
+            return redirect()->route('admin.bookings.index')
+                ->with('error', 'Partners do not have permission to edit bookings.');
+        }
+
         $booking->load([
             'bookingAmenities.amenity',
             'bookingMaintains.maintain',
-            'bookingRoomPrices.roomPrice'
+            'bookingRoomPrices.room'
         ]);
 
         $packages = Package::with([
@@ -288,21 +356,44 @@ class BookingController extends Controller
 
     public function destroy(Booking $booking)
     {
+        $user = Auth::user();
+        $isPartner = $user->roles->pluck('name')->contains('Partner');
+
+        // Partners cannot delete bookings
+        if ($isPartner) {
+            return redirect()->route('admin.bookings.index')
+                ->with('error', 'Partners do not have permission to delete bookings.');
+        }
+
         DB::beginTransaction();
 
         try {
-            // Delete related records
+            // Delete all related records
+            // 1. Delete booking amenities
             $booking->bookingAmenities()->delete();
+
+            // 2. Delete booking maintains
             $booking->bookingMaintains()->delete();
+
+            // 3. Delete booking room prices
             $booking->bookingRoomPrices()->delete();
+
+            // 4. Delete booking payments (milestone payments)
             $booking->bookingPayments()->delete();
 
+            // 5. Delete payment records (actual payment transactions)
+            $booking->payments()->delete();
+
+            // 6. Delete payment links if any
+            $booking->paymentLinks()->delete();
+
+            // 7. Finally delete the booking itself
             $booking->delete();
 
             DB::commit();
 
             return redirect()->route('admin.bookings.index')
-                ->with('success', 'Booking deleted successfully.');
+                ->with('success', 'Booking and all related records deleted successfully.');
 
         } catch (\Exception $e) {
             DB::rollback();
@@ -319,5 +410,33 @@ class BookingController extends Controller
         })->with('room')->get();
 
         return response()->json($roomPrices);
+    }
+
+    /**
+     * Update booking status
+     */
+    public function updateStatus(Request $request, Booking $booking)
+    {
+        $validated = $request->validate([
+            'status' => 'required|in:pending,approved,rejected,cancelled'
+        ]);
+
+        $booking->update(['status' => $validated['status']]);
+
+        return redirect()->back()->with('success', 'Booking status updated successfully!');
+    }
+
+    /**
+     * Update payment status
+     */
+    public function updatePaymentStatus(Request $request, Booking $booking)
+    {
+        $validated = $request->validate([
+            'payment_status' => 'required|in:pending,paid,partial,failed'
+        ]);
+
+        $booking->update(['payment_status' => $validated['payment_status']]);
+
+        return redirect()->back()->with('success', 'Payment status updated successfully!');
     }
 }

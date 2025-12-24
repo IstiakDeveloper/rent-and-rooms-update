@@ -1,7 +1,10 @@
-import { Head, Link } from '@inertiajs/react';
+import { Head, Link, router } from '@inertiajs/react';
 import AdminLayout from '@/layouts/AdminLayout';
 import { format } from 'date-fns';
 import * as packageRoutes from '@/routes/admin/packages';
+import * as bookingRoutes from '@/routes/admin/bookings';
+import * as adminBookingRoutes from '@/routes/admin/admin-bookings';
+import { useState } from 'react';
 import {
     ArrowLeft,
     Edit,
@@ -20,6 +23,8 @@ import {
     Armchair,
     Video,
     RotateCcw,
+    Eye,
+    Trash2,
 } from 'lucide-react';
 
 interface RoomPrice {
@@ -28,6 +33,7 @@ interface RoomPrice {
     fixed_price: number;
     discount_price: number | null;
     booking_price: number;
+    rent_advance_price: number;
 }
 
 interface Room {
@@ -114,10 +120,41 @@ interface ShowPackage {
 interface Props {
     package: ShowPackage;
     bookings: BookingData[];
+    userRole: {
+        isPartner: boolean;
+        isAdmin: boolean;
+        isSuperAdmin: boolean;
+    };
 }
 
-export default function Show({ package: pkg, bookings }: Props) {
+export default function Show({ package: pkg, bookings, userRole = { isPartner: false, isAdmin: false, isSuperAdmin: false } }: Props) {
     const isExpired = new Date(pkg.expiration_date) < new Date();
+    const [deleteModalOpen, setDeleteModalOpen] = useState(false);
+    const [bookingToDelete, setBookingToDelete] = useState<number | null>(null);
+
+    const handleDeleteClick = (bookingId: number) => {
+        setBookingToDelete(bookingId);
+        setDeleteModalOpen(true);
+    };
+
+    const handleDeleteConfirm = () => {
+        if (!bookingToDelete) return;
+        router.delete(bookingRoutes.destroy(bookingToDelete).url, {
+            preserveScroll: true,
+            onSuccess: () => {
+                setDeleteModalOpen(false);
+                setBookingToDelete(null);
+            },
+            onError: () => {
+                alert('Failed to delete booking. Please try again.');
+            },
+        });
+    };
+
+    const handleDeleteCancel = () => {
+        setDeleteModalOpen(false);
+        setBookingToDelete(null);
+    };
 
     return (
         <AdminLayout>
@@ -152,13 +189,15 @@ export default function Show({ package: pkg, bookings }: Props) {
                             <ArrowLeft className="w-4 h-4" />
                             Back
                         </Link>
-                        <Link
-                            href={packageRoutes.edit(pkg.id).url}
-                            className="px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition-colors flex items-center gap-2"
-                        >
-                            <Edit className="w-4 h-4" />
-                            Edit
-                        </Link>
+                        {!userRole.isPartner && (
+                            <Link
+                                href={packageRoutes.edit(pkg.id).url}
+                                className="px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition-colors flex items-center gap-2"
+                            >
+                                <Edit className="w-4 h-4" />
+                                Edit
+                            </Link>
+                        )}
                     </div>
                 </div>
 
@@ -195,27 +234,35 @@ export default function Show({ package: pkg, bookings }: Props) {
                                         <th className="px-4 py-3 text-left text-xs font-medium text-gray-600 uppercase">Duration</th>
                                         <th className="px-4 py-3 text-left text-xs font-medium text-gray-600 uppercase">Amount</th>
                                         <th className="px-4 py-3 text-left text-xs font-medium text-gray-600 uppercase">Status</th>
+                                        <th className="px-4 py-3 text-left text-xs font-medium text-gray-600 uppercase">Actions</th>
                                     </tr>
                                 </thead>
                                 <tbody className="divide-y divide-gray-200">
                                     {bookings.map((booking) => (
                                         <tr key={booking.id} className="hover:bg-gray-50">
                                             <td className="px-4 py-3">
-                                                {booking.user && (
-                                                    <div>
-                                                        <p className="font-medium text-gray-900">{booking.user.name}</p>
-                                                        <p className="text-sm text-gray-600">{booking.user.email}</p>
-                                                    </div>
+                                                {booking.user ? (
+                                                    <>
+                                                        <Link
+                                                            href={`/admin/users/${booking.user.id}`}
+                                                            className="font-medium text-blue-600 hover:text-blue-800 hover:underline"
+                                                        >
+                                                            {booking.user.name}
+                                                        </Link>
+                                                        <div className="text-sm text-gray-600">{booking.user.email}</div>
+                                                    </>
+                                                ) : (
+                                                    <span className="text-sm text-gray-600">-</span>
                                                 )}
                                             </td>
                                             <td className="px-4 py-3">
                                                 <div className="flex flex-wrap gap-1">
                                                     {booking.bookingRoomPrices.map((brp) => (
-                                                        brp.room && (
+                                                        brp.room ? (
                                                             <span key={brp.id} className="px-2 py-1 text-xs bg-blue-100 text-blue-700 rounded">
                                                                 {brp.room.name}
                                                             </span>
-                                                        )
+                                                        ) : null
                                                     ))}
                                                 </div>
                                             </td>
@@ -239,8 +286,10 @@ export default function Show({ package: pkg, bookings }: Props) {
                                                     <p className="text-gray-500 text-xs">{booking.number_of_days} days</p>
                                                 </div>
                                             </td>
-                                            <td className="px-4 py-3 font-medium text-gray-900">
-                                                £{Number(booking.booking_price).toFixed(2)}
+                                            <td className="px-4 py-3">
+                                                <div className="text-sm">
+                                                    <p className="font-medium text-gray-900">£{Number(booking.booking_price || 0).toFixed(2)}</p>
+                                                </div>
                                             </td>
                                             <td className="px-4 py-3">
                                                 <span className={`px-3 py-1 text-xs font-medium rounded-full ${
@@ -251,11 +300,85 @@ export default function Show({ package: pkg, bookings }: Props) {
                                                     {booking.payment_status}
                                                 </span>
                                             </td>
+                                            <td className="px-4 py-3">
+                                                <div className="flex items-center gap-2">
+                                                    <Link
+                                                        href={bookingRoutes.show(booking.id).url}
+                                                        className="p-2 text-blue-600 hover:bg-blue-50 rounded-lg transition-colors"
+                                                        title="View Details"
+                                                    >
+                                                        <Eye className="w-4 h-4" />
+                                                    </Link>
+                                                    {!userRole.isPartner && (
+                                                        <>
+                                                            <Link
+                                                                href={adminBookingRoutes.edit(booking.id).url}
+                                                                className="p-2 text-green-600 hover:bg-green-50 rounded-lg transition-colors"
+                                                                title="Edit Booking"
+                                                            >
+                                                                <Edit className="w-4 h-4" />
+                                                            </Link>
+                                                            <button
+                                                                type="button"
+                                                                onClick={() => handleDeleteClick(booking.id)}
+                                                                className="p-2 text-red-600 hover:bg-red-50 rounded-lg transition-colors"
+                                                                title="Delete Booking"
+                                                            >
+                                                                <Trash2 className="w-4 h-4" />
+                                                            </button>
+                                                        </>
+                                                    )}
+                                                </div>
+                                            </td>
                                         </tr>
                                     ))}
                                 </tbody>
                             </table>
                         </div>
+
+                        {/* Delete Confirmation Modal (rendered once) */}
+                        {deleteModalOpen && (
+                            <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50">
+                                <div className="bg-white rounded-lg p-6 max-w-md w-full mx-4">
+                                    <div className="flex items-center mb-4">
+                                        <div className="shrink-0 w-12 h-12 rounded-full bg-red-100 flex items-center justify-center">
+                                            <Trash2 className="w-6 h-6 text-red-600" />
+                                        </div>
+                                        <div className="ml-4">
+                                            <h3 className="text-lg font-medium text-gray-900">Delete Booking</h3>
+                                            <p className="text-sm text-gray-500">Booking #{bookingToDelete}</p>
+                                        </div>
+                                    </div>
+                                    <p className="text-sm text-gray-600 mb-6">
+                                        Are you sure you want to delete this booking? This will permanently remove:
+                                    </p>
+                                    <ul className="text-sm text-gray-600 mb-6 space-y-2 list-disc list-inside">
+                                        <li>Booking details</li>
+                                        <li>All payment records</li>
+                                        <li>Milestone payments</li>
+                                        <li>Amenities and maintenance records</li>
+                                        <li>Room price information</li>
+                                    </ul>
+                                    <p className="text-sm text-red-600 font-medium mb-6">
+                                        This action cannot be undone.
+                                    </p>
+                                    <div className="flex gap-3 justify-end">
+                                        <button
+                                            onClick={handleDeleteCancel}
+                                            className="px-4 py-2 border border-gray-300 rounded-lg text-sm font-medium text-gray-700 hover:bg-gray-50 transition-colors"
+                                        >
+                                            Cancel
+                                        </button>
+                                        <button
+                                            onClick={handleDeleteConfirm}
+                                            className="px-4 py-2 bg-red-600 text-white rounded-lg text-sm font-medium hover:bg-red-700 transition-colors"
+                                        >
+                                            Delete Booking
+                                        </button>
+                                    </div>
+                                </div>
+                            </div>
+                        )}
                     </div>
                 )}
 
@@ -366,17 +489,23 @@ export default function Show({ package: pkg, bookings }: Props) {
                                         <div className="space-y-2">
                                             <p className="text-sm font-medium text-gray-700">Pricing Options:</p>
                                             {room.prices.map((price) => (
-                                                <div key={price.id} className="flex items-center justify-between bg-gray-50 rounded px-3 py-2">
-                                                    <span className="text-sm text-gray-700">{price.type}</span>
-                                                    <div className="text-right">
-                                                        <span className="text-sm font-semibold text-gray-900">
-                                                            £{Number(price.booking_price).toFixed(2)}
-                                                        </span>
-                                                        {price.discount_price && (
-                                                            <span className="text-xs text-gray-500 line-through ml-2">
-                                                                £{Number(price.fixed_price).toFixed(2)}
+                                                <div key={price.id} className="bg-gray-50 rounded px-3 py-2 space-y-1">
+                                                    <div className="flex items-center justify-between">
+                                                        <span className="text-sm text-gray-700">{price.type}</span>
+                                                        <div className="text-right">
+                                                            <span className="text-sm font-semibold text-gray-900">
+                                                                £{Number(price.booking_price).toFixed(2)}
                                                             </span>
-                                                        )}
+                                                            {price.discount_price && (
+                                                                <span className="text-xs text-gray-500 line-through ml-2">
+                                                                    £{Number(price.fixed_price).toFixed(2)}
+                                                                </span>
+                                                            )}
+                                                        </div>
+                                                    </div>
+                                                    <div className="flex items-center justify-between text-xs text-gray-600">
+                                                        <span>Rent Advance:</span>
+                                                        <span className="font-medium">£{Number(price.rent_advance_price || 0).toFixed(2)}</span>
                                                     </div>
                                                 </div>
                                             ))}

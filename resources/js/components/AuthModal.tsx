@@ -1,7 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import { createPortal } from 'react-dom';
 import { X, User, Building, Eye, EyeOff, Mail, Lock, Phone, MapPin, FileText } from 'lucide-react';
-import { router } from '@inertiajs/react';
+import { router, usePage } from '@inertiajs/react';
 
 interface AuthModalProps {
     isOpen: boolean;
@@ -32,6 +32,18 @@ interface LoginData {
     [key: string]: any;
 }
 
+interface PartnerTermsCondition {
+    id: number;
+    title: string;
+    content: string;
+}
+
+interface TermsCondition {
+    id: number;
+    title: string;
+    content: string;
+}
+
 export default function AuthModal({ isOpen, onClose, initialTab = 'login' }: AuthModalProps) {
     const [activeTab, setActiveTab] = useState<'login' | 'register'>(initialTab);
     const [registrationType, setRegistrationType] = useState<'user' | 'partner'>('user');
@@ -40,6 +52,11 @@ export default function AuthModal({ isOpen, onClose, initialTab = 'login' }: Aut
     const [showTerms, setShowTerms] = useState(false);
     const [isSubmitting, setIsSubmitting] = useState(false);
     const [errors, setErrors] = useState<FormErrors>({});
+
+    // Get terms data from Inertia page props
+    const { props } = usePage();
+    const partnerTerms = (props.partnerTermsConditions as PartnerTermsCondition[]) || [];
+    const userTerms = (props.termsConditions as TermsCondition[]) || [];
 
     // Login form data
     const [loginData, setLoginData] = useState<LoginData>({
@@ -117,14 +134,20 @@ export default function AuthModal({ isOpen, onClose, initialTab = 'login' }: Aut
         setIsSubmitting(true);
         setErrors({});
 
+        // Get current URL to redirect back after login
+        const currentUrl = window.location.href;
+
         try {
-            router.post('/login', loginData, {
+            router.post('/login', {
+                ...loginData,
+                intended_url: currentUrl
+            }, {
                 onSuccess: (page) => {
                     onClose();
-                    // Gentle page refresh to update auth state
+                    // Reload only auth data to update UI, staying on same page
                     setTimeout(() => {
                         router.reload({ only: ['auth'] });
-                    }, 500);
+                    }, 300);
                 },
                 onError: (errors) => {
                     setErrors(errors);
@@ -151,20 +174,24 @@ export default function AuthModal({ isOpen, onClose, initialTab = 'login' }: Aut
             return;
         }
 
-        // Update registration data with type
+        // Get current URL to redirect back after registration
+        const currentUrl = window.location.href;
+
+        // Update registration data with type and intended URL
         const submitData = {
             ...registrationData,
-            type: registrationType
+            type: registrationType,
+            intended_url: currentUrl
         };
 
         try {
             router.post('/register', submitData, {
                 onSuccess: (page) => {
                     onClose();
-                    // Gentle page refresh to update auth state
+                    // Reload only auth data to update UI, staying on same page
                     setTimeout(() => {
                         router.reload({ only: ['auth'] });
-                    }, 500);
+                    }, 300);
                 },
                 onError: (errors) => {
                     setErrors(errors);
@@ -335,7 +362,7 @@ export default function AuthModal({ isOpen, onClose, initialTab = 'login' }: Aut
                                         <span className={`text-sm font-medium ${
                                             registrationType === 'user' ? 'text-indigo-900' : 'text-gray-700'
                                         }`}>
-                                            User
+                                            Guest
                                         </span>
                                         <p className={`text-xs mt-1 ${
                                             registrationType === 'user' ? 'text-indigo-600' : 'text-gray-500'
@@ -376,7 +403,7 @@ export default function AuthModal({ isOpen, onClose, initialTab = 'login' }: Aut
                             {/* Common Fields */}
                             <div>
                                 <label className="block text-sm font-medium text-gray-700 mb-2">
-                                    Full Name
+                                    Full Name <span className="text-red-500">*</span>
                                 </label>
                                 <input
                                     type="text"
@@ -391,7 +418,7 @@ export default function AuthModal({ isOpen, onClose, initialTab = 'login' }: Aut
 
                             <div>
                                 <label className="block text-sm font-medium text-gray-700 mb-2">
-                                    Email Address
+                                    Email Address <span className="text-red-500">*</span>
                                 </label>
                                 <div className="relative">
                                     <Mail className="absolute left-3 top-1/2 transform -translate-y-1/2 w-5 h-5 text-gray-400" />
@@ -409,7 +436,7 @@ export default function AuthModal({ isOpen, onClose, initialTab = 'login' }: Aut
 
                             <div>
                                 <label className="block text-sm font-medium text-gray-700 mb-2">
-                                    Phone Number
+                                    Phone Number <span className="text-red-500">*</span>
                                 </label>
                                 <div className="relative">
                                     <Phone className="absolute left-3 top-1/2 transform -translate-y-1/2 w-5 h-5 text-gray-400" />
@@ -579,32 +606,58 @@ export default function AuthModal({ isOpen, onClose, initialTab = 'login' }: Aut
                         <div className="p-6">
                             <div className="prose max-w-none">
                                 {registrationType === 'partner' ? (
-                                    <div className="space-y-4 text-sm text-gray-600">
+                                    /* Partner Terms from Database */
+                                    <div className="space-y-4">
                                         <h4 className="text-lg font-semibold text-gray-900">Partner Terms & Conditions</h4>
-                                        <p>By registering as a partner, you agree to the following terms:</p>
-                                        <ul className="list-disc pl-6 space-y-2">
-                                            <li>You must provide accurate and complete information about your properties</li>
-                                            <li>You are responsible for maintaining property standards and safety</li>
-                                            <li>Commission rates and payment terms as agreed in the partnership agreement</li>
-                                            <li>You must respond to booking inquiries within 24 hours</li>
-                                            <li>You agree to follow our cancellation and refund policies</li>
-                                            <li>You are responsible for legal compliance in your jurisdiction</li>
-                                        </ul>
-                                        <p>These terms are specific to property partners and may differ from user terms.</p>
+                                        {partnerTerms && partnerTerms.length > 0 ? (
+                                            partnerTerms.map((term) => (
+                                                <div key={term.id} className="border-b border-gray-200 pb-4 last:border-b-0">
+                                                    <h5 className="text-md font-bold text-gray-800 mb-2">{term.title}</h5>
+                                                    <div className="text-sm text-gray-600 whitespace-pre-line leading-relaxed">
+                                                        {term.content}
+                                                    </div>
+                                                </div>
+                                            ))
+                                        ) : (
+                                            <div className="space-y-4 text-sm text-gray-600">
+                                                <p>By registering as a partner, you agree to the following terms:</p>
+                                                <ul className="list-disc pl-6 space-y-2">
+                                                    <li>You must provide accurate and complete information about your properties</li>
+                                                    <li>You are responsible for maintaining property standards and safety</li>
+                                                    <li>Commission rates and payment terms as agreed in the partnership agreement</li>
+                                                    <li>You must respond to booking inquiries within 24 hours</li>
+                                                    <li>You agree to follow our cancellation and refund policies</li>
+                                                    <li>You are responsible for legal compliance in your jurisdiction</li>
+                                                </ul>
+                                            </div>
+                                        )}
                                     </div>
                                 ) : (
-                                    <div className="space-y-4 text-sm text-gray-600">
+                                    /* User/Guest Terms from Database */
+                                    <div className="space-y-4">
                                         <h4 className="text-lg font-semibold text-gray-900">User Terms & Conditions</h4>
-                                        <p>By creating a user account, you agree to:</p>
-                                        <ul className="list-disc pl-6 space-y-2">
-                                            <li>Provide accurate personal information</li>
-                                            <li>Use our platform responsibly and legally</li>
-                                            <li>Respect property rules and guidelines</li>
-                                            <li>Pay for bookings as agreed</li>
-                                            <li>Follow our community guidelines</li>
-                                            <li>Report any issues or damages promptly</li>
-                                        </ul>
-                                        <p>These terms ensure a safe and enjoyable experience for all users.</p>
+                                        {userTerms && userTerms.length > 0 ? (
+                                            userTerms.map((term) => (
+                                                <div key={term.id} className="border-b border-gray-200 pb-4 last:border-b-0">
+                                                    <h5 className="text-md font-bold text-gray-800 mb-2">{term.title}</h5>
+                                                    <div className="text-sm text-gray-600 whitespace-pre-line leading-relaxed">
+                                                        {term.content}
+                                                    </div>
+                                                </div>
+                                            ))
+                                        ) : (
+                                            <div className="space-y-4 text-sm text-gray-600">
+                                                <p>By creating a user account, you agree to:</p>
+                                                <ul className="list-disc pl-6 space-y-2">
+                                                    <li>Provide accurate personal information</li>
+                                                    <li>Use our platform responsibly and legally</li>
+                                                    <li>Respect property rules and guidelines</li>
+                                                    <li>Pay for bookings as agreed</li>
+                                                    <li>Follow our community guidelines</li>
+                                                    <li>Report any issues or damages promptly</li>
+                                                </ul>
+                                            </div>
+                                        )}
                                     </div>
                                 )}
                             </div>

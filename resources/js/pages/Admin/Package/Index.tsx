@@ -22,13 +22,19 @@ import { format } from 'date-fns';
 interface Props {
     packages: Package[];
     availablePartners: User[];
+    availableAdmins: User[];
+    userRole: {
+        isPartner: boolean;
+        isAdmin: boolean;
+        isSuperAdmin: boolean;
+    };
     filters: {
         search?: string;
         status?: string;
     };
 }
 
-export default function Index({ packages, availablePartners, filters }: Props) {
+export default function Index({ packages, availablePartners, availableAdmins, userRole, filters }: Props) {
     const [showAssignModal, setShowAssignModal] = useState(false);
     const [showDeleteModal, setShowDeleteModal] = useState(false);
     const [selectedPackage, setSelectedPackage] = useState<Package | null>(null);
@@ -48,12 +54,16 @@ export default function Index({ packages, availablePartners, filters }: Props) {
     }, [packages]);
 
     const assignForm = useForm({
-        user_id: '',
+        partner_id: '',
+        admin_id: '',
     });
 
     const openAssignModal = (pkg: Package) => {
         setSelectedPackage(pkg);
-        assignForm.setData('user_id', pkg.assigned_to?.toString() || '');
+        assignForm.setData({
+            partner_id: pkg.assigned_to?.toString() || '',
+            admin_id: (pkg as any).admin_id?.toString() || '',
+        });
         setShowAssignModal(true);
     };
 
@@ -135,13 +145,15 @@ export default function Index({ packages, availablePartners, filters }: Props) {
                         <h1 className="text-2xl font-bold text-gray-900">Package Management</h1>
                         <p className="text-sm text-gray-600 mt-1">{packages.length} packages available</p>
                     </div>
-                    <Link
-                        href={packageRoutes.create().url}
-                        className="inline-flex items-center px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition-colors"
-                    >
-                        <Plus className="w-4 h-4 mr-2" />
-                        Create Package
-                    </Link>
+                    {!userRole.isPartner && (
+                        <Link
+                            href={packageRoutes.create().url}
+                            className="inline-flex items-center px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition-colors"
+                        >
+                            <Plus className="w-4 h-4 mr-2" />
+                            Create Package
+                        </Link>
+                    )}
                 </div>
 
                 {/* Filters */}
@@ -225,7 +237,11 @@ export default function Index({ packages, availablePartners, filters }: Props) {
                         {packages.map((pkg) => (
                             <div
                                 key={pkg.id}
-                                className="bg-white rounded-lg border border-gray-200 hover:shadow-md transition-shadow"
+                                className={`rounded-lg border hover:shadow-md transition-shadow ${
+                                    pkg.bookings && pkg.bookings.length > 0
+                                        ? 'bg-blue-50 border-blue-200'
+                                        : 'bg-white border-gray-200'
+                                }`}
                             >
                                 <div className="p-6">
                                     <div className="flex items-start justify-between">
@@ -252,25 +268,41 @@ export default function Index({ packages, availablePartners, filters }: Props) {
                                                 </div>
                                             </div>
 
-                                            <div className="flex items-center gap-6 text-sm">
+                                            <div className="flex items-center gap-6 text-sm mb-3">
                                                 <div>
                                                     <span className="text-gray-500">Created by:</span>
                                                     <span className="ml-2 font-medium text-gray-900">{pkg.creator?.name || 'Unknown'}</span>
                                                 </div>
-                                                <div>
-                                                    <span className="text-gray-500">Assigned to:</span>
-                                                    {(pkg.assignedPartner || (pkg as any).assigned_partner) ? (
+                                                {(pkg as any).franchise && (
+                                                    <div>
+                                                        <span className="text-gray-500">Franchise:</span>
+                                                        <span className="ml-2 font-medium text-purple-700 bg-purple-50 px-2 py-0.5 rounded">
+                                                            {(pkg as any).franchise.name}
+                                                        </span>
+                                                    </div>
+                                                )}
+                                                {(pkg as any).assignedAdmin && (
+                                                    <div>
+                                                        <span className="text-gray-500">Admin:</span>
+                                                        <span className="ml-2 font-medium text-purple-700 bg-purple-100 px-2 py-0.5 rounded">
+                                                            {(pkg as any).assignedAdmin.name}
+                                                        </span>
+                                                    </div>
+                                                )}
+                                                {pkg.assignedPartner && (
+                                                    <div>
+                                                        <span className="text-gray-500">Partner:</span>
                                                         <span className="ml-2 font-medium text-green-700 bg-green-50 px-2 py-0.5 rounded">
-                                                            {pkg.assignedPartner?.name || (pkg as any).assigned_partner?.name}
+                                                            {pkg.assignedPartner.name}
                                                         </span>
-                                                    ) : pkg.assigned_to ? (
-                                                        <span className="ml-2 font-medium text-orange-700 bg-orange-50 px-2 py-0.5 rounded">
-                                                            Assigned (ID: {pkg.assigned_to})
-                                                        </span>
-                                                    ) : (
+                                                    </div>
+                                                )}
+                                                {!pkg.assignedPartner && !(pkg as any).assignedAdmin && (
+                                                    <div>
+                                                        <span className="text-gray-500">Assignment:</span>
                                                         <span className="ml-2 text-gray-400 italic">Not assigned</span>
-                                                    )}
-                                                </div>
+                                                    </div>
+                                                )}
                                                 <div>
                                                     <span className="inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium bg-blue-100 text-blue-800">
                                                         <Clock className="w-3 h-3 mr-1" />
@@ -278,6 +310,47 @@ export default function Index({ packages, availablePartners, filters }: Props) {
                                                     </span>
                                                 </div>
                                             </div>
+
+                                            {/* Bookings List - Compact Grid Layout */}
+                                            {pkg.bookings && pkg.bookings.length > 0 && (
+                                                <div className="pt-3 border-t border-blue-200">
+                                                    <h4 className="text-xs font-semibold text-gray-700 mb-2 flex items-center gap-1">
+                                                        <Clock className="w-3 h-3" />
+                                                        Active Bookings:
+                                                    </h4>
+                                                    <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-2">
+                                                        {pkg.bookings.map((booking: any) => (
+                                                            <div key={booking.id} className="bg-white rounded-md p-2 shadow-sm border border-gray-200">
+                                                                <div className="flex items-start justify-between mb-1">
+                                                                    {booking.user && (
+                                                                        <Link
+                                                                            href={`/admin/users/${booking.user.id}`}
+                                                                            className="font-medium text-sm text-blue-600 hover:text-blue-800 hover:underline truncate flex-1 mr-2"
+                                                                        >
+                                                                            {booking.user.name}
+                                                                        </Link>
+                                                                    )}
+                                                                    <span className={`px-1.5 py-0.5 text-xs font-medium rounded whitespace-nowrap ${
+                                                                        booking.payment_status === 'paid' ? 'bg-green-100 text-green-700' :
+                                                                        booking.payment_status === 'partially_paid' ? 'bg-yellow-100 text-yellow-700' :
+                                                                        'bg-red-100 text-red-700'
+                                                                    }`}>
+                                                                        {booking.payment_status}
+                                                                    </span>
+                                                                </div>
+                                                                <div className="flex items-center justify-between text-xs">
+                                                                    <span className="text-gray-600 truncate">
+                                                                        {format(new Date(booking.from_date), 'MMM dd')} - {format(new Date(booking.to_date), 'MMM dd')}
+                                                                    </span>
+                                                                    <span className="font-bold text-gray-900 whitespace-nowrap ml-2">
+                                                                        £{Number(booking.total_amount || 0).toFixed(0)}
+                                                                    </span>
+                                                                </div>
+                                                            </div>
+                                                        ))}
+                                                    </div>
+                                                </div>
+                                            )}
                                         </div>
 
                                         {/* Actions */}
@@ -289,27 +362,31 @@ export default function Index({ packages, availablePartners, filters }: Props) {
                                             >
                                                 <Eye className="w-5 h-5" />
                                             </Link>
-                                            <Link
-                                                href={packageRoutes.edit(pkg.id).url}
-                                                className="p-2 text-amber-600 hover:bg-amber-50 rounded-lg transition-colors"
-                                                title="Edit"
-                                            >
-                                                <Edit className="w-5 h-5" />
-                                            </Link>
-                                            <button
-                                                onClick={() => openAssignModal(pkg)}
-                                                className="p-2 text-green-600 hover:bg-green-50 rounded-lg transition-colors"
-                                                title="Assign"
-                                            >
-                                                <UserPlus className="w-5 h-5" />
-                                            </button>
-                                            <button
-                                                onClick={() => openDeleteModal(pkg)}
-                                                className="p-2 text-red-600 hover:bg-red-50 rounded-lg transition-colors"
-                                                title="Delete"
-                                            >
-                                                <Trash2 className="w-5 h-5" />
-                                            </button>
+                                            {!userRole.isPartner && (
+                                                <>
+                                                    <Link
+                                                        href={packageRoutes.edit(pkg.id).url}
+                                                        className="p-2 text-amber-600 hover:bg-amber-50 rounded-lg transition-colors"
+                                                        title="Edit"
+                                                    >
+                                                        <Edit className="w-5 h-5" />
+                                                    </Link>
+                                                    <button
+                                                        onClick={() => openAssignModal(pkg)}
+                                                        className="p-2 text-green-600 hover:bg-green-50 rounded-lg transition-colors"
+                                                        title="Assign"
+                                                    >
+                                                        <UserPlus className="w-5 h-5" />
+                                                    </button>
+                                                    <button
+                                                        onClick={() => openDeleteModal(pkg)}
+                                                        className="p-2 text-red-600 hover:bg-red-50 rounded-lg transition-colors"
+                                                        title="Delete"
+                                                    >
+                                                        <Trash2 className="w-5 h-5" />
+                                                    </button>
+                                                </>
+                                            )}
                                         </div>
                                     </div>
                                 </div>
@@ -329,33 +406,63 @@ export default function Index({ packages, availablePartners, filters }: Props) {
                                 {selectedPackage.name}
                             </p>
 
-                            {selectedPackage.assignedPartner && (
-                                <div className="mb-4 p-3 bg-blue-50 border border-blue-200 rounded-lg">
-                                    <p className="text-sm text-blue-800">
-                                        Currently assigned to: <span className="font-semibold">{selectedPackage.assignedPartner.name}</span>
-                                    </p>
+                            {(selectedPackage.assignedPartner || (selectedPackage as any).assignedAdmin) && (
+                                <div className="mb-4 p-3 bg-blue-50 border border-blue-200 rounded-lg space-y-1">
+                                    {selectedPackage.assignedPartner && (
+                                        <p className="text-sm text-blue-800">
+                                            <span className="font-medium">Partner:</span> <span className="font-semibold">{selectedPackage.assignedPartner.name}</span>
+                                        </p>
+                                    )}
+                                    {(selectedPackage as any).assignedAdmin && (
+                                        <p className="text-sm text-blue-800">
+                                            <span className="font-medium">Admin:</span> <span className="font-semibold">{(selectedPackage as any).assignedAdmin.name}</span>
+                                        </p>
+                                    )}
                                 </div>
                             )}
 
                             <form onSubmit={handleAssign}>
+                                {/* Admin Assignment */}
                                 <div className="mb-4">
                                     <label className="block text-sm font-medium text-gray-700 mb-2">
-                                        Select Partner
+                                        Assign Admin (Franchise)
                                     </label>
                                     <select
-                                        value={assignForm.data.user_id}
-                                        onChange={(e) => assignForm.setData('user_id', e.target.value)}
+                                        value={assignForm.data.admin_id}
+                                        onChange={(e) => assignForm.setData('admin_id', e.target.value)}
                                         className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent"
                                     >
-                                        <option value="">Unassign (Remove Assignment)</option>
+                                        <option value="">No Admin Assigned</option>
+                                        {availableAdmins.map((admin) => (
+                                            <option key={admin.id} value={admin.id}>
+                                                {admin.name} - {admin.email}
+                                            </option>
+                                        ))}
+                                    </select>
+                                    {assignForm.errors.admin_id && (
+                                        <p className="mt-1 text-sm text-red-600">{assignForm.errors.admin_id}</p>
+                                    )}
+                                </div>
+
+                                {/* Partner Assignment */}
+                                <div className="mb-4">
+                                    <label className="block text-sm font-medium text-gray-700 mb-2">
+                                        Assign Partner
+                                    </label>
+                                    <select
+                                        value={assignForm.data.partner_id}
+                                        onChange={(e) => assignForm.setData('partner_id', e.target.value)}
+                                        className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+                                    >
+                                        <option value="">No Partner Assigned</option>
                                         {availablePartners.map((partner) => (
                                             <option key={partner.id} value={partner.id}>
                                                 {partner.name} - {partner.email}
                                             </option>
                                         ))}
                                     </select>
-                                    {assignForm.errors.user_id && (
-                                        <p className="mt-1 text-sm text-red-600">{assignForm.errors.user_id}</p>
+                                    {assignForm.errors.partner_id && (
+                                        <p className="mt-1 text-sm text-red-600">{assignForm.errors.partner_id}</p>
                                     )}
                                 </div>
 

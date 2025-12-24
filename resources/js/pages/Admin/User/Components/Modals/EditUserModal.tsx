@@ -23,7 +23,7 @@ export default function EditUserModal({ isOpen, user, onClose, onSuccess }: Prop
 
     const handleSubmit = (e: React.FormEvent) => {
         e.preventDefault();
-        form.patch(`/users/${user.id}/update-info`, {
+        form.patch(`/admin/users/${user.id}/update-info`, {
             onSuccess: () => {
                 onSuccess();
                 onClose();

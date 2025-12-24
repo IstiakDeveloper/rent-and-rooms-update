@@ -33,6 +33,29 @@ class AuthenticatedSessionController extends Controller
 
         $request->session()->regenerate();
 
+        // Get the intended URL from request or use referer
+        $intendedUrl = $request->input('intended_url') ?? $request->headers->get('referer');
+
+        // Clean the URL and check if it's valid
+        if ($intendedUrl) {
+            // Parse the URL to check if it's not login/register/dashboard
+            $path = parse_url($intendedUrl, PHP_URL_PATH);
+            $excludedPaths = ['/login', '/register', '/dashboard', '/admin/dashboard', '/guest/dashboard'];
+
+            $shouldRedirectToIntended = true;
+            foreach ($excludedPaths as $excludedPath) {
+                if (str_contains($path, $excludedPath)) {
+                    $shouldRedirectToIntended = false;
+                    break;
+                }
+            }
+
+            if ($shouldRedirectToIntended) {
+                return redirect($intendedUrl)->with('success', 'Welcome back!');
+            }
+        }
+
+        // Otherwise use Laravel's intended redirect or dashboard
         return redirect()->intended(route('dashboard', absolute: false));
     }
 

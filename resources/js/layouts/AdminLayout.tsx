@@ -1,5 +1,5 @@
 import { useState, PropsWithChildren } from 'react';
-import { Link, usePage } from '@inertiajs/react';
+import { Link, usePage, router } from '@inertiajs/react';
 import {
     Home,
     Users,
@@ -18,6 +18,10 @@ import {
     ChevronDown,
     User,
     FileText,
+    CheckCircle,
+    AlertCircle,
+    AlertTriangle,
+    Info,
 } from 'lucide-react';
 
 interface NavItem {
@@ -31,6 +35,7 @@ interface AuthUser {
     id: number;
     name: string;
     email: string;
+    email_verified_at?: string | null;
     role?: string;
     role_name?: string; // Spatie role name
     status?: string;
@@ -47,18 +52,30 @@ interface PageProps {
     auth: {
         user: AuthUser;
     };
-    flash: FlashMessages;
+    flash?: FlashMessages;
 }
 
 export default function AdminLayout({ children }: PropsWithChildren) {
-    const { auth, flash } = usePage<PageProps>().props;
+    const pageProps = usePage<PageProps>().props;
+    const { auth } = pageProps;
+    const flash = pageProps.flash;
+
     const [sidebarOpen, setSidebarOpen] = useState(false);
     const [openDropdowns, setOpenDropdowns] = useState<string[]>([]);
+    const [dismissedFlash, setDismissedFlash] = useState<string[]>([]);
 
     // Check if user is Partner (use Spatie role)
     const userRole = auth.user?.role_name || auth.user?.role;
     const isPartner = userRole === 'Partner';
+    const isAdmin = userRole === 'Admin';
     const isSuperAdmin = userRole === 'Super Admin';
+
+    // Check if user needs email verification (not Super Admin and email not verified)
+    const needsEmailVerification = auth?.user && !auth.user.email_verified_at && !isSuperAdmin;
+
+    const handleVerifyEmail = () => {
+        router.visit('/email/verify');
+    };
 
     const toggleDropdown = (name: string) => {
         setOpenDropdowns(prev =>
@@ -70,8 +87,8 @@ export default function AdminLayout({ children }: PropsWithChildren) {
 
     const navigation: NavItem[] = [
         { name: 'Dashboard', href: '/admin/dashboard', icon: Home },
-        // User Management - Only Super Admin & Admin
-        ...(!isPartner ? [{
+        // User Management - Only Super Admin
+        ...(isSuperAdmin ? [{
             name: 'User Management',
             icon: Users,
             children: [
@@ -84,7 +101,7 @@ export default function AdminLayout({ children }: PropsWithChildren) {
             icon: Package,
             children: [
                 { name: 'All Packages', href: '/admin/packages', icon: Package },
-                { name: 'Create Package', href: '/admin/packages/create', icon: Sparkles },
+                ...(isSuperAdmin ? [{ name: 'Create Package', href: '/admin/packages/create', icon: Sparkles }] : []),
             ],
         },
         {
@@ -92,11 +109,11 @@ export default function AdminLayout({ children }: PropsWithChildren) {
             icon: Calendar,
             children: [
                 { name: 'All Bookings', href: '/admin/bookings', icon: Calendar },
-                { name: 'Create Booking', href: '/admin/admin-bookings/create', icon: Calendar },
+                ...(isSuperAdmin ? [{ name: 'Create Booking', href: '/admin/admin-bookings/create', icon: Calendar }] : []),
             ],
         },
-        // Locations - Only Super Admin & Admin
-        ...(!isPartner ? [{
+        // Locations - Only Super Admin
+        ...(isSuperAdmin ? [{
             name: 'Locations',
             icon: MapPin,
             children: [
@@ -105,8 +122,8 @@ export default function AdminLayout({ children }: PropsWithChildren) {
                 { name: 'Areas', href: '/admin/areas', icon: MapPin },
             ],
         }] : []),
-        // Properties - Only Super Admin & Admin
-        ...(!isPartner ? [{
+        // Properties - Only Super Admin
+        ...(isSuperAdmin ? [{
             name: 'Properties',
             icon: Building,
             children: [
@@ -114,8 +131,8 @@ export default function AdminLayout({ children }: PropsWithChildren) {
                 { name: 'Property Types', href: '/admin/property-types', icon: Building },
             ],
         }] : []),
-        // Amenities - Only Super Admin & Admin
-        ...(!isPartner ? [{
+        // Amenities - Only Super Admin
+        ...(isSuperAdmin ? [{
             name: 'Amenities',
             icon: Sparkles,
             children: [
@@ -123,8 +140,8 @@ export default function AdminLayout({ children }: PropsWithChildren) {
                 { name: 'Amenity Types', href: '/admin/amenity-types', icon: Sparkles },
             ],
         }] : []),
-        // Maintenance - Only Super Admin & Admin
-        ...(!isPartner ? [{
+        // Maintenance - Only Super Admin
+        ...(isSuperAdmin ? [{
             name: 'Maintenance',
             icon: Wrench,
             children: [
@@ -140,11 +157,13 @@ export default function AdminLayout({ children }: PropsWithChildren) {
                 { name: 'Payment Links', href: '/admin/payment-links', icon: FileText },
             ],
         },
-        // Mail - Only Super Admin & Admin
-        ...(!isPartner ? [{ name: 'Mail', href: '/admin/mail', icon: Mail }] : []),
+        // Mail - Only Super Admin
+        ...(isSuperAdmin ? [{ name: 'Mail', href: '/admin/mail', icon: Mail }] : []),
+        // Join Packages - Only Super Admin
+        ...(isSuperAdmin ? [{ name: 'Join Packages', href: '/admin/join-packages', icon: Package }] : []),
         { name: 'Profile', href: '/admin/profile', icon: User },
         // Settings - Only Super Admin
-        // { name: 'Settings', href: '/admin/settings', icon: Settings },
+        ...(isSuperAdmin ? [{ name: 'Settings', href: '/admin/settings', icon: Settings }] : []),
     ];
 
 
@@ -304,6 +323,14 @@ export default function AdminLayout({ children }: PropsWithChildren) {
                         <div className="flex-1" />
 
                         <div className="flex items-center space-x-4">
+                            <Link href="/">
+                                <div className="flex items-center space-x-2 px-3 py-2 rounded-lg hover:bg-indigo-50 transition-all duration-300 cursor-pointer transform hover:scale-105 group">
+                                    <Home className="h-5 w-5 text-gray-600 group-hover:text-indigo-600 transition-colors" />
+                                    <span className="hidden sm:block text-sm font-medium text-gray-700 group-hover:text-indigo-600 transition-colors">
+                                        Home
+                                    </span>
+                                </div>
+                            </Link>
                             <Link href="/admin/profile">
                                 <div className="flex items-center space-x-2 px-3 py-2 rounded-lg hover:bg-gray-50 transition-all duration-300 cursor-pointer transform hover:scale-105">
                                     <div className="w-9 h-9 rounded-full bg-gradient-to-br from-indigo-500 via-purple-600 to-pink-600 flex items-center justify-center text-white text-sm font-semibold shadow-md">
@@ -318,27 +345,99 @@ export default function AdminLayout({ children }: PropsWithChildren) {
                     </div>
                 </header>
 
+                {/* Email Verification Alert */}
+                {needsEmailVerification && (
+                    <div className="bg-gradient-to-r from-yellow-50 to-amber-50 border-b-2 border-yellow-400 sticky top-16 z-30">
+                        <div className="px-4 sm:px-6 lg:px-8 py-4">
+                            <div className="flex items-center justify-between">
+                                <div className="flex items-center space-x-3 flex-1">
+                                    <AlertCircle className="h-6 w-6 text-yellow-600 flex-shrink-0 animate-pulse" />
+                                    <div className="flex-1">
+                                        <p className="text-sm font-semibold text-gray-900">
+                                            Email Verification Required
+                                        </p>
+                                        <p className="text-xs text-gray-700 mt-0.5">
+                                            Please verify your email address to access all features.
+                                        </p>
+                                    </div>
+                                </div>
+                                <button
+                                    onClick={handleVerifyEmail}
+                                    className="ml-4 px-4 py-2 bg-gradient-to-r from-yellow-500 to-amber-600 text-white text-sm font-semibold rounded-lg hover:from-yellow-600 hover:to-amber-700 transition-all duration-300 hover:scale-105 hover:shadow-lg flex items-center space-x-2 flex-shrink-0"
+                                >
+                                    <CheckCircle className="h-4 w-4" />
+                                    <span>Verify Email</span>
+                                </button>
+                            </div>
+                        </div>
+                    </div>
+                )}
+
                 {/* Flash messages */}
-                {(flash?.success || flash?.error || flash?.warning || flash?.info) && (
+                {flash && (
                     <div className="px-4 sm:px-6 lg:px-8 pt-4">
-                        {flash.success && (
-                            <div className="mb-4 p-4 bg-gradient-to-r from-green-50 to-emerald-50 border border-green-200 rounded-xl shadow-sm animate-slide-in">
-                                <p className="text-sm text-green-800 font-medium">{flash.success}</p>
+                        {flash.success && !dismissedFlash.includes('success') && (
+                            <div className="mb-4 p-4 bg-gradient-to-r from-green-50 to-emerald-50 border-l-4 border-green-500 rounded-lg shadow-md animate-slide-in">
+                                <div className="flex items-start">
+                                    <CheckCircle className="h-5 w-5 text-green-600 mt-0.5 mr-3 flex-shrink-0" />
+                                    <div className="flex-1">
+                                        <p className="text-sm font-semibold text-green-800">{flash.success}</p>
+                                    </div>
+                                    <button
+                                        onClick={() => setDismissedFlash([...dismissedFlash, 'success'])}
+                                        className="ml-3 text-green-600 hover:text-green-800 transition-colors"
+                                    >
+                                        <X className="h-5 w-5" />
+                                    </button>
+                                </div>
                             </div>
                         )}
-                        {flash.error && (
-                            <div className="mb-4 p-4 bg-gradient-to-r from-red-50 to-pink-50 border border-red-200 rounded-xl shadow-sm animate-slide-in">
-                                <p className="text-sm text-red-800 font-medium">{flash.error}</p>
+                        {flash.error && !dismissedFlash.includes('error') && (
+                            <div className="mb-4 p-4 bg-gradient-to-r from-red-50 to-pink-50 border-l-4 border-red-500 rounded-lg shadow-md animate-slide-in">
+                                <div className="flex items-start">
+                                    <AlertCircle className="h-5 w-5 text-red-600 mt-0.5 mr-3 flex-shrink-0" />
+                                    <div className="flex-1">
+                                        <p className="text-sm font-semibold text-red-800">{flash.error}</p>
+                                    </div>
+                                    <button
+                                        onClick={() => setDismissedFlash([...dismissedFlash, 'error'])}
+                                        className="ml-3 text-red-600 hover:text-red-800 transition-colors"
+                                    >
+                                        <X className="h-5 w-5" />
+                                    </button>
+                                </div>
                             </div>
                         )}
-                        {flash.warning && (
-                            <div className="mb-4 p-4 bg-gradient-to-r from-yellow-50 to-amber-50 border border-yellow-200 rounded-xl shadow-sm animate-slide-in">
-                                <p className="text-sm text-yellow-800 font-medium">{flash.warning}</p>
+                        {flash.warning && !dismissedFlash.includes('warning') && (
+                            <div className="mb-4 p-4 bg-gradient-to-r from-yellow-50 to-amber-50 border-l-4 border-yellow-500 rounded-lg shadow-md animate-slide-in">
+                                <div className="flex items-start">
+                                    <AlertTriangle className="h-5 w-5 text-yellow-600 mt-0.5 mr-3 flex-shrink-0" />
+                                    <div className="flex-1">
+                                        <p className="text-sm font-semibold text-yellow-800">{flash.warning}</p>
+                                    </div>
+                                    <button
+                                        onClick={() => setDismissedFlash([...dismissedFlash, 'warning'])}
+                                        className="ml-3 text-yellow-600 hover:text-yellow-800 transition-colors"
+                                    >
+                                        <X className="h-5 w-5" />
+                                    </button>
+                                </div>
                             </div>
                         )}
-                        {flash.info && (
-                            <div className="mb-4 p-4 bg-gradient-to-r from-blue-50 to-indigo-50 border border-blue-200 rounded-xl shadow-sm animate-slide-in">
-                                <p className="text-sm text-blue-800 font-medium">{flash.info}</p>
+                        {flash.info && !dismissedFlash.includes('info') && (
+                            <div className="mb-4 p-4 bg-gradient-to-r from-blue-50 to-indigo-50 border-l-4 border-blue-500 rounded-lg shadow-md animate-slide-in">
+                                <div className="flex items-start">
+                                    <Info className="h-5 w-5 text-blue-600 mt-0.5 mr-3 flex-shrink-0" />
+                                    <div className="flex-1">
+                                        <p className="text-sm font-semibold text-blue-800">{flash.info}</p>
+                                    </div>
+                                    <button
+                                        onClick={() => setDismissedFlash([...dismissedFlash, 'info'])}
+                                        className="ml-3 text-blue-600 hover:text-blue-800 transition-colors"
+                                    >
+                                        <X className="h-5 w-5" />
+                                    </button>
+                                </div>
                             </div>
                         )}
                     </div>

@@ -49,6 +49,7 @@ interface RoomPrice {
     fixed_price: number;
     discount_price: number | null;
     booking_price: number;
+    rent_advance_price: number;
 }
 
 interface Room {
@@ -152,7 +153,7 @@ export default function Edit({
         video_link: packageData.video_link || '',
         entire_property_prices: (initialEntirePropertyPrices && initialEntirePropertyPrices.length > 0
             ? initialEntirePropertyPrices
-            : [{ type: '', fixed_price: 0, discount_price: null, booking_price: 0 }]
+            : [{ type: '', fixed_price: 0, discount_price: null, booking_price: 0, rent_advance_price: 0 }]
         ) as RoomPrice[],
         rooms: packageData.rooms.map(room => ({
             id: room.id,
@@ -165,6 +166,7 @@ export default function Edit({
                 fixed_price: price.fixed_price,
                 discount_price: price.discount_price,
                 booking_price: price.booking_price,
+                rent_advance_price: price.rent_advance_price || 0,
             })),
         })) as Room[],
         freeMaintains: initialFreeMaintains as number[],
@@ -222,7 +224,7 @@ export default function Edit({
                 name: '',
                 number_of_beds: 1,
                 number_of_bathrooms: 0,
-                prices: [{ type: '', fixed_price: 0, discount_price: null, booking_price: 0 }],
+                prices: [{ type: '', fixed_price: 0, discount_price: null, booking_price: 0, rent_advance_price: 0 }],
             },
         ]);
     };
@@ -244,7 +246,7 @@ export default function Edit({
     const addPrice = (roomIndex: number) => {
         if (data.rooms[roomIndex].prices.length < 3) {
             const newRooms = [...data.rooms];
-            newRooms[roomIndex].prices.push({ type: '', fixed_price: 0, discount_price: null, booking_price: 0 });
+            newRooms[roomIndex].prices.push({ type: '', fixed_price: 0, discount_price: null, booking_price: 0, rent_advance_price: 0 });
             setData('rooms', newRooms);
         }
     };
@@ -268,7 +270,7 @@ export default function Edit({
         if (data.entire_property_prices.length < 3) {
             setData('entire_property_prices', [
                 ...data.entire_property_prices,
-                { type: '', fixed_price: 0, discount_price: null, booking_price: 0 }
+                { type: '', fixed_price: 0, discount_price: null, booking_price: 0, rent_advance_price: 0 }
             ]);
         }
     };
@@ -668,6 +670,24 @@ export default function Edit({
                                                 />
                                             </div>
                                         </div>
+
+                                        <div className="mt-4">
+                                            <div>
+                                                <label className="block text-sm font-medium text-gray-700 mb-2">
+                                                    Rent Advance Price (£) <span className="text-red-500">*</span>
+                                                </label>
+                                                <input
+                                                    type="number"
+                                                    value={price.rent_advance_price}
+                                                    onChange={(e) => updateEntirePropertyPrice(index, 'rent_advance_price', Number(e.target.value))}
+                                                    min="0"
+                                                    step="0.01"
+                                                    placeholder="0.00"
+                                                    className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+                                                />
+                                                <p className="text-xs text-gray-500 mt-1">Security deposit amount (refundable)</p>
+                                            </div>
+                                        </div>
                                     </div>
                                 ))}
                             </div>
@@ -950,6 +970,27 @@ export default function Edit({
                                                                 </button>
                                                             )}
                                                         </div>
+                                                    </div>
+
+                                                    <div className="mt-3 bg-gray-50 rounded-lg p-3">
+                                                        <label className="block text-xs font-medium text-gray-700 mb-1">
+                                                            Rent Advance Price <span className="text-red-500">*</span>
+                                                        </label>
+                                                        <div className="flex">
+                                                            <span className="inline-flex items-center px-3 text-sm bg-gray-200 border border-r-0 border-gray-300 rounded-l-lg">
+                                                                £
+                                                            </span>
+                                                            <input
+                                                                type="number"
+                                                                value={price.rent_advance_price}
+                                                                onChange={(e) => updatePrice(roomIndex, priceIndex, 'rent_advance_price', Number(e.target.value))}
+                                                                step="0.01"
+                                                                min="0"
+                                                                placeholder="0.00"
+                                                                className="w-full px-3 py-2 text-sm border border-gray-300 rounded-r-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+                                                            />
+                                                        </div>
+                                                        <p className="text-xs text-gray-500 mt-1">Security deposit amount (refundable)</p>
                                                     </div>
                                                 </div>
                                             ))}

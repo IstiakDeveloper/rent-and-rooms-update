@@ -29,10 +29,14 @@ class LoginController extends Controller
      */
     public function store(Request $request): RedirectResponse|JsonResponse
     {
-        $credentials = $request->validate([
+        $request->validate([
             'email' => 'required|string|email',
             'password' => 'required|string',
+            'intended_url' => 'nullable|string',
         ]);
+
+        // Get credentials without intended_url
+        $credentials = $request->only('email', 'password');
 
         $this->ensureIsNotRateLimited($request);
 
@@ -48,6 +52,9 @@ class LoginController extends Controller
 
         $request->session()->regenerate();
 
+        // Get the intended URL from request or use referer
+        $intendedUrl = $request->input('intended_url') ?? $request->headers->get('referer');
+
         // Return JSON response for AJAX requests (modal)
         if ($request->expectsJson()) {
             $user = Auth::user();
@@ -60,8 +67,26 @@ class LoginController extends Controller
                     'email' => $user->email,
                     'roles' => method_exists($user, 'getRoleNames') ? $user->getRoleNames() : []
                 ],
-                'redirect' => $this->getRedirectRoute($user)
+                'redirect' => $intendedUrl ?? $this->getRedirectRoute($user)
             ]);
+        }
+
+        // Check if we should stay on the same page
+        if ($intendedUrl) {
+            $path = parse_url($intendedUrl, PHP_URL_PATH);
+            $excludedPaths = ['/login', '/register', '/dashboard', '/admin/dashboard', '/guest/dashboard'];
+
+            $shouldRedirectToIntended = true;
+            foreach ($excludedPaths as $excludedPath) {
+                if ($path && str_contains($path, $excludedPath)) {
+                    $shouldRedirectToIntended = false;
+                    break;
+                }
+            }
+
+            if ($shouldRedirectToIntended) {
+                return redirect($intendedUrl)->with('success', 'Welcome back!');
+            }
         }
 
         // Redirect based on user role for regular form submissions

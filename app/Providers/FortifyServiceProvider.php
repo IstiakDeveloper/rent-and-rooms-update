@@ -64,6 +64,10 @@ class FortifyServiceProvider extends ServiceProvider
 
         Fortify::verifyEmailView(fn (Request $request) => Inertia::render('auth/verify-email', [
             'status' => $request->session()->get('status'),
+            'header' => \App\Models\Header::first(),
+            'footer' => \App\Models\Footer::with(['footerSectionTwo', 'footerSectionThree', 'footerSectionFour.socialLinks'])->first(),
+            'countries' => \App\Models\Country::all(),
+            'selectedCountry' => session('selectedCountry', 1),
         ]));
 
         Fortify::registerView(fn () => Inertia::render('auth/register'));
